@@ -1,0 +1,11 @@
+include ':app'
+include ':capacitor-cordova-android-plugins'
+project(':capacitor-cordova-android-plugins').projectDir = new File('./capacitor-cordova-android-plugins/')
+include ':vibemoments-camera'
+
+project(':vibemoments-camera').projectDir = new File(
+    rootProject.projectDir,
+    '../../node_modules/vibemoments-camera/android'
+)
+
+apply from: 'capacitor.settings.gradle'
