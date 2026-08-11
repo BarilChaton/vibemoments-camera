@@ -224,19 +224,26 @@ class VibeCameraPlugin : Plugin() {
 
     @PluginMethod
     fun switchCamera(call: PluginCall) {
-        try {
-            val lens = cameraManager.switchCamera()
+        Log.d(tag, "switchCamera called")
 
-            val result = JSObject()
+        activity.runOnUiThread {
+            try {
+                val lens = cameraManager.switchCamera()
 
-            result.put("lens", lens)
+                Log.d(tag, "Camera switched to $lens")
 
-            call.resolve(result)
-        } catch (exception: Exception) {
-            call.reject(
-                "Unable to switch camera",
-                exception
-            )
+                val result = JSObject()
+                result.put("lens", lens)
+
+                call.resolve(result)
+            } catch (exception: Exception) {
+                Log.e(tag, "Unable to switch camera", exception)
+
+                call.reject(
+                    "Unable to switch camera",
+                    exception
+                )
+            }
         }
     }
 

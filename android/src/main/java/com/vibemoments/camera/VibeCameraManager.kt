@@ -47,6 +47,8 @@ class VibeCameraManager(
         val provider = cameraProvider ?: return
         val view = previewView ?: return
 
+        Log.d("VibeCameraManager", "Binding camera lens: ${currentLens()}")
+
         val cameraSelector = CameraSelector.Builder()
             .requireLensFacing(lensFacing)
             .build()
@@ -68,6 +70,18 @@ class VibeCameraManager(
             preview,
             imageCapture
         )
+
+        Log.d("VibeCameraManager", "Camera bound successfully: ${currentLens()}")
+    }
+
+    private fun hasCamera(lensFacing: Int): Boolean {
+        val provider = cameraProvider ?: return false
+
+        return provider.hasCamera(
+            CameraSelector.Builder()
+                .requireLensFacing(lensFacing)
+                .build()
+        )
     }
 
     fun stopPreview() {
@@ -77,11 +91,17 @@ class VibeCameraManager(
     }
 
     fun switchCamera(): String {
-        lensFacing = if (lensFacing == CameraSelector.LENS_FACING_BACK) {
+        val targetLens = if (lensFacing == CameraSelector.LENS_FACING_BACK) {
             CameraSelector.LENS_FACING_FRONT
         } else {
             CameraSelector.LENS_FACING_BACK
         }
+
+        if (!hasCamera(targetLens)) {
+            throw IllegalStateException("Requested camera is not available")
+        }
+
+        lensFacing = targetLens
 
         bindCameraUseCases()
 

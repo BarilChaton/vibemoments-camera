@@ -56,6 +56,8 @@ export function useCamera() {
 
   const switchCamera = useCallback(async () => {
     try {
+      setError(null)
+
       const result = await Camera.switchCamera()
 
       if (result?.lens) {
