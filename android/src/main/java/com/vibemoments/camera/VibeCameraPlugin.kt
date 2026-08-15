@@ -2,10 +2,10 @@ package com.vibemoments.camera
 
 import android.Manifest
 import android.content.pm.PackageManager
-import android.util.Log
-import android.view.ViewGroup
 import android.graphics.Color
-import android.view.View
+import android.util.Log
+import android.view.Surface
+import android.view.ViewGroup
 import android.widget.FrameLayout
 
 import androidx.camera.view.PreviewView
@@ -30,30 +30,39 @@ import com.getcapacitor.annotation.PermissionCallback
 )
 class VibeCameraPlugin : Plugin() {
 
-    private val tag = "VibeCamera"
+    private val logTag = "VibeCamera"
+
     private lateinit var cameraManager: VibeCameraManager
+
     private var previewView: PreviewView? = null
     private var previewContainer: FrameLayout? = null
-    private var originalWebViewBackground: Int? = null
+
+    private var videoPreviewView: android.view.TextureView? = null
+    private var videoPreviewSurface: Surface? = null
+    private var videoRecorder: VibeVideoRecorder? = null
+
+    private var pendingVideoCall: PluginCall? = null
 
     override fun load() {
         super.load()
 
-        Log.d(tag, "Plugin loaded")
+        Log.d(logTag, "Plugin loaded")
 
         cameraManager = VibeCameraManager(
             context,
             activity,
             ContextCompat.getMainExecutor(context)
         )
+
+        videoRecorder = VibeVideoRecorder(context)
     }
 
     @PluginMethod
     fun startPreview(call: PluginCall) {
-        Log.d(tag, "startPreview called")
+        Log.d(logTag, "startPreview called")
 
         if (previewView != null) {
-            Log.d(tag, "Camera preview already active")
+            Log.d(logTag, "Camera preview already active")
 
             val result = JSObject()
             result.put("active", true)
@@ -74,6 +83,7 @@ class VibeCameraPlugin : Plugin() {
                 call,
                 "cameraPermissionCallback"
             )
+
             return
         }
 
@@ -96,7 +106,7 @@ class VibeCameraPlugin : Plugin() {
     }
 
     private fun openPreview(call: PluginCall) {
-        Log.d(tag, "openPreview called")
+        Log.d(logTag, "openPreview called")
 
         activity.runOnUiThread {
             try {
@@ -109,7 +119,7 @@ class VibeCameraPlugin : Plugin() {
                 }
 
                 if (previewContainer == null) {
-                    Log.d(tag, "Creating camera preview behind WebView")
+                    Log.d(logTag, "Creating camera preview behind WebView")
 
                     previewContainer = FrameLayout(context).apply {
                         layoutParams = ViewGroup.LayoutParams(
@@ -142,21 +152,28 @@ class VibeCameraPlugin : Plugin() {
                     webView.bringToFront()
                 }
 
-                Log.d(tag, "Starting CameraX preview")
+                Log.d(logTag, "Starting CameraX preview")
 
                 cameraManager.startPreview(
                     previewView!!,
+
                     onReady = {
-                        Log.d(tag, "Camera preview ready")
+                        Log.d(logTag, "Camera preview ready")
 
                         val result = JSObject()
+
                         result.put("active", true)
                         result.put("lens", cameraManager.currentLens())
 
                         call.resolve(result)
                     },
+
                     onError = { exception ->
-                        Log.e(tag, "Unable to start camera", exception)
+                        Log.e(
+                            logTag,
+                            "Unable to start camera",
+                            exception
+                        )
 
                         call.reject(
                             "Unable to start camera",
@@ -165,7 +182,11 @@ class VibeCameraPlugin : Plugin() {
                     }
                 )
             } catch (exception: Exception) {
-                Log.e(tag, "Unable to create camera preview", exception)
+                Log.e(
+                    logTag,
+                    "Unable to create camera preview",
+                    exception
+                )
 
                 call.reject(
                     "Unable to create camera preview",
@@ -177,7 +198,7 @@ class VibeCameraPlugin : Plugin() {
 
     @PluginMethod
     fun stopPreview(call: PluginCall) {
-        Log.d(tag, "stopPreview called")
+        Log.d(logTag, "stopPreview called")
 
         activity.runOnUiThread {
             cameraManager.stopPreview()
@@ -197,22 +218,40 @@ class VibeCameraPlugin : Plugin() {
 
     @PluginMethod
     fun capturePhoto(call: PluginCall) {
-        Log.d(tag, "capturePhoto called")
+        Log.d(logTag, "capturePhoto called")
 
         cameraManager.capturePhoto(
             onSuccess = { file ->
-                Log.d(tag, "Photo captured: ${file.absolutePath}")
+                Log.d(
+                    logTag,
+                    "Photo captured: ${file.absolutePath}"
+                )
 
                 val result = JSObject()
+
                 result.put("type", "photo")
-                result.put("path", file.toURI().toString())
-                result.put("mimeType", "image/jpeg")
-                result.put("lens", cameraManager.currentLens())
+                result.put(
+                    "path",
+                    file.toURI().toString()
+                )
+                result.put(
+                    "mimeType",
+                    "image/jpeg"
+                )
+                result.put(
+                    "lens",
+                    cameraManager.currentLens()
+                )
 
                 call.resolve(result)
             },
+
             onError = { exception ->
-                Log.e(tag, "Photo capture failed", exception)
+                Log.e(
+                    logTag,
+                    "Photo capture failed",
+                    exception
+                )
 
                 call.reject(
                     "Unable to capture photo",
@@ -224,20 +263,31 @@ class VibeCameraPlugin : Plugin() {
 
     @PluginMethod
     fun switchCamera(call: PluginCall) {
-        Log.d(tag, "switchCamera called")
+        Log.d(logTag, "switchCamera called")
 
         activity.runOnUiThread {
             try {
                 val lens = cameraManager.switchCamera()
 
-                Log.d(tag, "Camera switched to $lens")
+                Log.d(
+                    logTag,
+                    "Camera switched to $lens"
+                )
 
                 val result = JSObject()
-                result.put("lens", lens)
+
+                result.put(
+                    "lens",
+                    lens
+                )
 
                 call.resolve(result)
             } catch (exception: Exception) {
-                Log.e(tag, "Unable to switch camera", exception)
+                Log.e(
+                    logTag,
+                    "Unable to switch camera",
+                    exception
+                )
 
                 call.reject(
                     "Unable to switch camera",
@@ -251,28 +301,48 @@ class VibeCameraPlugin : Plugin() {
     fun getCameraState(call: PluginCall) {
         val result = JSObject()
 
-        result.put("active", previewView != null)
-        result.put("lens", cameraManager.currentLens())
+        result.put(
+            "active",
+            previewView != null
+        )
+
+        result.put(
+            "lens",
+            cameraManager.currentLens()
+        )
 
         call.resolve(result)
     }
 
     @PluginMethod
     fun setTorch(call: PluginCall) {
-        val enabled = call.getBoolean("enabled") ?: false
+        val enabled =
+            call.getBoolean("enabled")
+                ?: false
 
-        Log.d(tag, "setTorch called: $enabled")
+        Log.d(
+            logTag,
+            "setTorch called: $enabled"
+        )
 
         activity.runOnUiThread {
             try {
                 cameraManager.setTorch(enabled)
 
                 val result = JSObject()
-                result.put("enabled", enabled)
+
+                result.put(
+                    "enabled",
+                    enabled
+                )
 
                 call.resolve(result)
             } catch (exception: Exception) {
-                Log.e(tag, "Unable to set torch", exception)
+                Log.e(
+                    logTag,
+                    "Unable to set torch",
+                    exception
+                )
 
                 call.reject(
                     "Unable to set torch",
@@ -284,20 +354,34 @@ class VibeCameraPlugin : Plugin() {
 
     @PluginMethod
     fun setFlashMode(call: PluginCall) {
-        val mode = call.getString("mode") ?: "off"
+        val mode =
+            call.getString("mode")
+                ?: "off"
 
-        Log.d(tag, "setFlashMode called: $mode")
+        Log.d(
+            logTag,
+            "setFlashMode called: $mode"
+        )
 
         activity.runOnUiThread {
             try {
-                val resultMode = cameraManager.setFlashMode(mode)
+                val resultMode =
+                    cameraManager.setFlashMode(mode)
 
                 val result = JSObject()
-                result.put("mode", resultMode)
+
+                result.put(
+                    "mode",
+                    resultMode
+                )
 
                 call.resolve(result)
             } catch (exception: Exception) {
-                Log.e(tag, "Unable to set flash mode", exception)
+                Log.e(
+                    logTag,
+                    "Unable to set flash mode",
+                    exception
+                )
 
                 call.reject(
                     "Unable to set flash mode",
@@ -311,9 +395,277 @@ class VibeCameraPlugin : Plugin() {
     fun getCapabilities(call: PluginCall) {
         val result = JSObject()
 
-        result.put("hasFlash", cameraManager.hasFlash())
-        result.put("lens", cameraManager.currentLens())
+        result.put(
+            "hasFlash",
+            cameraManager.hasFlash()
+        )
+
+        result.put(
+            "lens",
+            cameraManager.currentLens()
+        )
 
         call.resolve(result)
+    }
+
+    private fun createVideoPreview(
+        onReady: (Surface) -> Unit,
+        onError: (Exception) -> Unit
+    ) {
+        activity.runOnUiThread {
+            try {
+                val container =
+                    previewContainer
+                        ?: throw IllegalStateException(
+                            "Preview container is unavailable"
+                        )
+
+                previewView?.visibility =
+                    android.view.View.GONE
+
+                videoPreviewView =
+                    android.view.TextureView(context).apply {
+                        layoutParams =
+                            FrameLayout.LayoutParams(
+                                FrameLayout.LayoutParams.MATCH_PARENT,
+                                FrameLayout.LayoutParams.MATCH_PARENT
+                            )
+
+                        surfaceTextureListener =
+                            object :
+                                android.view.TextureView.SurfaceTextureListener {
+
+                                override fun onSurfaceTextureAvailable(
+                                    surfaceTexture:
+                                        android.graphics.SurfaceTexture,
+                                    width: Int,
+                                    height: Int
+                                ) {
+                                    Log.d(
+                                        logTag,
+                                        "Video TextureView ready"
+                                    )
+
+                                    videoPreviewSurface = Surface(surfaceTexture)
+
+                                    onReady(
+                                        videoPreviewSurface!!
+                                    )
+                                }
+
+                                override fun onSurfaceTextureSizeChanged(
+                                    surfaceTexture:
+                                        android.graphics.SurfaceTexture,
+                                    width: Int,
+                                    height: Int
+                                ) {}
+
+                                override fun onSurfaceTextureDestroyed(
+                                    surfaceTexture:
+                                        android.graphics.SurfaceTexture
+                                ): Boolean {
+                                    videoPreviewSurface?.release()
+                                    videoPreviewSurface = null
+                                    
+                                    return true
+                                }
+
+                                override fun onSurfaceTextureUpdated(
+                                    surfaceTexture:
+                                        android.graphics.SurfaceTexture
+                                ) {}
+                            }
+                    }
+
+                container.addView(
+                    videoPreviewView,
+                    0
+                )
+            } catch (exception: Exception) {
+                onError(exception)
+            }
+        }
+    }
+
+    @PluginMethod
+    fun startRecording(call: PluginCall) {
+        Log.d(logTag, "startRecording called")
+
+        activity.runOnUiThread {
+            try {
+                val currentLens: String =
+                    cameraManager.currentLens()
+
+                cameraManager.pauseForVideo()
+
+                createVideoPreview(
+                    onReady = { previewSurface ->
+
+                        videoRecorder?.start(
+                            previewSurface = previewSurface,
+                            lens = currentLens,
+
+                            onStarted = {
+                                Log.d(
+                                    logTag,
+                                    "Video recording started"
+                                )
+
+                                val result = JSObject()
+
+                                result.put(
+                                    "recording",
+                                    true
+                                )
+
+                                call.resolve(result)
+                            },
+
+                            onFinished = { file, duration ->
+                                Log.d(
+                                    logTag,
+                                    "Video finished: ${file.absolutePath}"
+                                )
+
+                                restoreCameraXPreview()
+
+                                pendingVideoCall?.let { stopCall ->
+                                    val result = JSObject()
+
+                                    result.put(
+                                        "type",
+                                        "video"
+                                    )
+
+                                    result.put(
+                                        "path",
+                                        file.toURI().toString()
+                                    )
+
+                                    result.put(
+                                        "mimeType",
+                                        "video/mp4"
+                                    )
+
+                                    result.put(
+                                        "durationMs",
+                                        duration
+                                    )
+
+                                    result.put(
+                                        "videoBitrate",
+                                        5_000_000
+                                    )
+
+                                    result.put(
+                                        "lens",
+                                        currentLens
+                                    )
+
+                                    stopCall.resolve(result)
+                                }
+
+                                pendingVideoCall = null
+                            },
+
+                            onError = { exception ->
+                                Log.e(
+                                    logTag,
+                                    "Video recording failed",
+                                    exception
+                                )
+
+                                restoreCameraXPreview()
+
+                                pendingVideoCall?.reject(
+                                    "Video recording failed",
+                                    exception
+                                )
+
+                                pendingVideoCall = null
+                            }
+                        ) ?: run {
+                            restoreCameraXPreview()
+
+                            call.reject(
+                                "Video recorder unavailable"
+                            )
+                        }
+                    },
+
+                    onError = { exception ->
+                        restoreCameraXPreview()
+
+                        call.reject(
+                            "Unable to create video preview",
+                            exception
+                        )
+                    }
+                )
+            } catch (exception: Exception) {
+                restoreCameraXPreview()
+
+                call.reject(
+                    "Unable to start recording",
+                    exception
+                )
+            }
+        }
+    }
+
+    @PluginMethod
+    fun stopRecording(call: PluginCall) {
+        Log.d(logTag, "stopRecording called")
+
+        activity.runOnUiThread {
+            try {
+                pendingVideoCall = call
+
+                videoRecorder?.stop()
+                    ?: throw IllegalStateException(
+                        "Video recorder unavailable"
+                    )
+            } catch (exception: Exception) {
+                pendingVideoCall = null
+
+                call.reject(
+                    "Unable to stop recording",
+                    exception
+                )
+            }
+        }
+    }
+
+    private fun restoreCameraXPreview() {
+        activity.runOnUiThread {
+            videoPreviewSurface?.release()
+            videoPreviewSurface = null
+
+            videoPreviewView?.let {
+                (it.parent as? ViewGroup)?.removeView(it)
+            }
+
+            videoPreviewView = null
+
+            previewView?.visibility =
+                android.view.View.VISIBLE
+
+            cameraManager.resumeAfterVideo(
+                onReady = {
+                    Log.d(
+                        logTag,
+                        "CameraX preview restored"
+                    )
+                },
+
+                onError = { exception ->
+                    Log.e(
+                        logTag,
+                        "Unable to restore CameraX preview",
+                        exception
+                    )
+                }
+            )
+        }
     }
 }

@@ -9,6 +9,7 @@ export function useCamera() {
   const [flashMode, setFlashModeState] = useState('off')
   const [hasFlash, setHasFlash] = useState(false)
   const [error, setError] = useState(null)
+  const [isRecording, setIsRecording] = useState(false)
 
   const start = useCallback(async () => {
     console.log('[VibeCamera] useCamera.start called')
@@ -114,6 +115,40 @@ export function useCamera() {
     }
   }, [])
 
+  const startRecording = useCallback(async () => {
+    try {
+      setError(null)
+
+      const result = await Camera.startRecording({
+        withAudio: false
+      })
+
+      setIsRecording(true)
+
+      return result
+    } catch (err) {
+      setError(err)
+      setIsRecording(false)
+      throw err
+    }
+  }, [])
+
+  const stopRecording = useCallback(async () => {
+    try {
+      setError(null)
+
+      const result = await Camera.stopRecording()
+
+      setIsRecording(false)
+
+      return result
+    } catch (err) {
+      setError(err)
+      setIsRecording(false)
+      throw err
+    }
+  }, [])
+
   useEffect(() => {
     return () => {
       if (isActive) Camera.stopPreview()
@@ -123,6 +158,7 @@ export function useCamera() {
   return {
     isActive,
     isCapturing,
+    isRecording,
     lens,
     error,
 
@@ -135,6 +171,8 @@ export function useCamera() {
     capturePhoto,
     switchCamera,
     setTorch,
-    setFlashMode
+    setFlashMode,
+    startRecording,
+    stopRecording
   }
 }

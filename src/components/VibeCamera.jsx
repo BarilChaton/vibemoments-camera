@@ -1,10 +1,11 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useCamera } from '../hooks/useCamera'
 
 export function VibeCamera({ autoStart = true, onCapture, onError }) {
   const {
     isActive,
     isCapturing,
+    isRecording,
     lens,
     hasFlash,
     torchEnabled,
@@ -14,9 +15,13 @@ export function VibeCamera({ autoStart = true, onCapture, onError }) {
     capturePhoto,
     switchCamera,
     setTorch,
-    setFlashMode
+    setFlashMode,
+    startRecording,
+    stopRecording
   } = useCamera()
+
   const hasStarted = useRef(false)
+  const [recordingSeconds, setRecordingSeconds] = useState(0)
 
   useEffect(() => {
     if (!autoStart || hasStarted.current) return
@@ -33,6 +38,19 @@ export function VibeCamera({ autoStart = true, onCapture, onError }) {
     }
   }, [])
 
+  useEffect(() => {
+    if (!isRecording) {
+      setRecordingSeconds(0)
+      return
+    }
+
+    const interval = setInterval(() => {
+      setRecordingSeconds((current) => current + 1)
+    }, 1000)
+
+    return () => clearInterval(interval)
+  }, [isRecording])
+
   async function handleCapture() {
     try {
       const media = await capturePhoto()
@@ -42,17 +60,42 @@ export function VibeCamera({ autoStart = true, onCapture, onError }) {
     }
   }
 
+  async function handleVideo() {
+    try {
+      if (!isRecording) {
+        await startRecording()
+        return
+      }
+
+      const video = await stopRecording()
+
+      console.log('VIDEO CAPTURED:', video)
+
+      onCapture?.(video)
+    } catch (error) {
+      console.error('VIDEO ERROR:', error)
+
+      onError?.(error)
+    }
+  }
+
   return (
     <div className="vibemoments-camera">
       <div id="vibemoments-camera-preview" className="vibemoments-camera-preview" />
 
+      {isRecording && <div className="vibemoments-camera-recording-time">REC {recordingSeconds}s / 30s</div>}
+
       <div className="vibemoments-camera-controls">
-        <button type="button" onClick={switchCamera} disabled={!isActive}>
+        <button type="button" onClick={switchCamera} disabled={!isActive || isRecording}>
           Flip
         </button>
 
         <button type="button" onClick={handleCapture} disabled={!isActive || isCapturing}>
           {isCapturing ? 'Capturing...' : 'Capture'}
+        </button>
+
+        <button type="button" onClick={handleVideo} disabled={!isActive || isCapturing}>
+          {isRecording ? 'Stop Video' : 'Record Video'}
         </button>
 
         {hasFlash && (

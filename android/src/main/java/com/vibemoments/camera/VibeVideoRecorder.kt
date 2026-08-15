@@ -314,4 +314,349 @@ class VibeVideoRecorder(
             "No supported video size"
         )
     }
+
+    @Suppress("MissingPermission")
+    fun start(
+        previewSurface: Surface,
+        lens: String,
+        onStarted: () -> Unit,
+        onFinished: (File, Long) -> Unit,
+        onError: (Exception) -> Unit
+    ) {
+        if (recording) {
+            onError(IllegalStateException("Recording already in progress"))
+            return
+        }
+
+        this.onFinished = onFinished
+        this.onError = onError
+
+        try {
+            val cameraId = findCameraId(lens)
+            val videoSize = chooseVideoSize(cameraId)
+
+            Log.d(TAG, "Starting video recorder")
+            Log.d(TAG, "Camera ID: $cameraId")
+            Log.d(TAG, "Video size: ${videoSize.width}x${videoSize.height}")
+
+            createMuxer()
+            createVideoEncoder(videoSize.width, videoSize.height)
+
+            cameraManager.openCamera(
+                cameraId,
+                object : CameraDevice.StateCallback() {
+                    override fun onOpened(camera: CameraDevice) {
+                        Log.d(TAG, "Camera2 device opened")
+
+                        cameraDevice = camera
+
+                        try {
+                            createVideoSession(
+                                camera,
+                                previewSurface,
+                                onStarted
+                            )
+                        } catch (exception: Exception) {
+                            fail(exception)
+                        }
+                    }
+
+                    override fun onDisconnected(camera: CameraDevice) {
+                        Log.e(TAG, "Camera2 disconnected")
+
+                        camera.close()
+                        cameraDevice = null
+
+                        fail(
+                            IllegalStateException(
+                                "Camera disconnected"
+                            )
+                        )
+                    }
+
+                    override fun onError(
+                        camera: CameraDevice,
+                        error: Int
+                    ) {
+                        Log.e(TAG, "Camera2 error: $error")
+
+                        camera.close()
+                        cameraDevice = null
+
+                        fail(
+                            IllegalStateException(
+                                "Camera error: $error"
+                            )
+                        )
+                    }
+                },
+                cameraHandler
+            )
+        } catch (exception: Exception) {
+            fail(exception)
+        }
+    }
+
+    private fun createVideoSession(
+        camera: CameraDevice,
+        previewSurface: Surface,
+        onStarted: () -> Unit
+    ) {
+        val encodeSurface = encoderSurface
+            ?: throw IllegalStateException(
+                "Encoder surface is unavailable"
+            )
+
+        val surfaces = listOf(
+            previewSurface,
+            encodeSurface
+        )
+
+        camera.createCaptureSession(
+            surfaces,
+            object : CameraCaptureSession.StateCallback() {
+                override fun onConfigured(
+                    session: CameraCaptureSession
+                ) {
+                    Log.d(TAG, "Camera2 video session configured")
+
+                    captureSession = session
+
+                    try {
+                        val request =
+                            camera.createCaptureRequest(
+                                CameraDevice.TEMPLATE_RECORD
+                            ).apply {
+                                addTarget(previewSurface)
+                                addTarget(encodeSurface)
+
+                                set(
+                                    CaptureRequest.CONTROL_MODE,
+                                    CameraMetadata.CONTROL_MODE_AUTO
+                                )
+
+                                set(
+                                    CaptureRequest.CONTROL_AF_MODE,
+                                    CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_VIDEO
+                                )
+                            }
+
+                        session.setRepeatingRequest(
+                            request.build(),
+                            null,
+                            cameraHandler
+                        )
+
+                        recording = true
+                        recordingStartedAt =
+                            System.currentTimeMillis()
+
+                        startEncoderDrainLoop()
+
+                        cameraHandler.postDelayed(
+                            {
+                                if (recording) {
+                                    Log.d(
+                                        TAG,
+                                        "30 second recording limit reached"
+                                    )
+
+                                    stop()
+                                }
+                            },
+                            MAX_DURATION_MS
+                        )
+
+                        Log.d(TAG, "Video recording started")
+
+                        onStarted()
+                    } catch (exception: Exception) {
+                        fail(exception)
+                    }
+                }
+
+                override fun onConfigureFailed(
+                    session: CameraCaptureSession
+                ) {
+                    fail(
+                        IllegalStateException(
+                            "Unable to configure Camera2 video session"
+                        )
+                    )
+                }
+            },
+            cameraHandler
+        )
+    }
+
+    private fun startEncoderDrainLoop() {
+        encoderHandler.post(
+            object : Runnable {
+                override fun run() {
+                    try {
+                        drainVideoEncoder(false)
+                    } catch (exception: Exception) {
+                        fail(exception)
+                        return
+                    }
+
+                    if (recording) {
+                        encoderHandler.postDelayed(
+                            this,
+                            5
+                        )
+                    }
+                }
+            }
+        )
+    }
+
+    fun stop() {
+        if (!recording) {
+            throw IllegalStateException(
+                "No recording in progress"
+            )
+        }
+
+        Log.d(TAG, "Stopping video recording")
+
+        recording = false
+
+        try {
+            captureSession?.stopRepeating()
+            captureSession?.abortCaptures()
+        } catch (_: Exception) {}
+
+        captureSession?.close()
+        captureSession = null
+
+        cameraDevice?.close()
+        cameraDevice = null
+
+        encoderHandler.post {
+            try {
+                drainVideoEncoder(true)
+
+                val duration =
+                    System.currentTimeMillis() -
+                    recordingStartedAt
+
+                finishRecording(duration)
+            } catch (exception: Exception) {
+                fail(exception)
+            }
+        }
+    }
+
+    private fun finishRecording(
+        durationMs: Long
+    ) {
+        Log.d(TAG, "Finalizing video")
+
+        try {
+            videoEncoder?.stop()
+        } catch (_: Exception) {}
+
+        try {
+            videoEncoder?.release()
+        } catch (_: Exception) {}
+
+        videoEncoder = null
+
+        encoderSurface?.release()
+        encoderSurface = null
+
+        try {
+            if (muxerStarted) {
+                muxer?.stop()
+            }
+        } catch (_: Exception) {}
+
+        try {
+            muxer?.release()
+        } catch (_: Exception) {}
+
+        muxer = null
+        muxerStarted = false
+        videoTrackIndex = -1
+
+        val file = outputFile
+
+        outputFile = null
+
+        if (file == null || !file.exists()) {
+            fail(
+                IllegalStateException(
+                    "Video output file was not created"
+                )
+            )
+            return
+        }
+
+        Log.d(
+            TAG,
+            "Video saved: ${file.absolutePath}"
+        )
+
+        Log.d(
+            TAG,
+            "Duration: ${durationMs}ms"
+        )
+
+        onFinished?.invoke(
+            file,
+            durationMs
+        )
+
+        onFinished = null
+        onError = null
+    }
+
+    private fun fail(
+        exception: Exception
+    ) {
+        Log.e(TAG, "Video recorder failed", exception)
+
+        recording = false
+
+        try {
+            captureSession?.close()
+        } catch (_: Exception) {}
+
+        try {
+            cameraDevice?.close()
+        } catch (_: Exception) {}
+
+        try {
+            videoEncoder?.stop()
+        } catch (_: Exception) {}
+
+        try {
+            videoEncoder?.release()
+        } catch (_: Exception) {}
+
+        try {
+            if (muxerStarted) {
+                muxer?.stop()
+            }
+        } catch (_: Exception) {}
+
+        try {
+            muxer?.release()
+        } catch (_: Exception) {}
+
+        captureSession = null
+        cameraDevice = null
+        videoEncoder = null
+        encoderSurface = null
+        muxer = null
+
+        muxerStarted = false
+        videoTrackIndex = -1
+
+        onError?.invoke(exception)
+
+        onFinished = null
+        onError = null
+    }
 }
