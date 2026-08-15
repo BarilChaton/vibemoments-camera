@@ -1,6 +1,6 @@
 {
   "name": "vibemoments-camera",
-  "version": "0.1.0",
+  "version": "0.1.6",
   "description": "Native camera engine and React components for VibeMoments",
   "type": "module",
   "main": "./dist/vibemoments-camera.js",
@@ -12,7 +12,9 @@
   },
   "files": [
     "dist",
-    "android"
+    "android/build.gradle",
+    "android/consumer-rules.pro",
+    "android/src"
   ],
   "capacitor": {
     "android": {
@@ -21,16 +23,19 @@
   },
   "scripts": {
     "dev": "vite",
-    "build": "vite build"
+    "build": "vite build",
+    "prepack": "npm run build"
   },
   "peerDependencies": {
     "@capacitor/core": "^8.5.0",
-    "react": "^19.2.8"
+    "react": "^19.2.8",
+    "react-icons": "^5.5.0"
   },
   "devDependencies": {
     "@capacitor/core": "^8.5.0",
     "@vitejs/plugin-react": "^6.0.5",
     "react": "^19.2.8",
+    "react-icons": "^5.5.0",
     "vite": "^8.2.1",
     "prettier": "^2.8.8"
   }

@@ -3,6 +3,7 @@ package com.vibemoments.camera
 import android.Manifest
 import android.content.pm.PackageManager
 import android.graphics.Color
+import android.graphics.Matrix
 import android.net.Uri
 import android.util.Log
 import android.view.Surface
@@ -37,6 +38,19 @@ import java.io.File
     ]
 )
 class VibeCameraPlugin : Plugin() {
+
+    companion object {
+        /*
+         * This matches the primary recording resolution currently used by
+         * VibeVideoRecorder.
+         *
+         * The SurfaceTexture needs to know the source buffer dimensions so
+         * Android does not simply stretch a camera frame into the dimensions
+         * of the full-screen TextureView.
+         */
+        private const val VIDEO_PREVIEW_WIDTH = 1280
+        private const val VIDEO_PREVIEW_HEIGHT = 720
+    }
 
     private val logTag = "VibeCamera"
 
@@ -256,8 +270,19 @@ class VibeCameraPlugin : Plugin() {
                                     FrameLayout.LayoutParams.MATCH_PARENT
                                 )
 
+                            /*
+                             * CameraX handles the aspect ratio and cropping
+                             * for the normal photo preview.
+                             */
                             scaleType =
                                 PreviewView.ScaleType.FILL_CENTER
+
+                            /*
+                             * TextureView based mode behaves better with our
+                             * native-preview-behind-WebView architecture.
+                             */
+                            implementationMode =
+                                PreviewView.ImplementationMode.COMPATIBLE
                         }
 
                     previewContainer!!
@@ -419,9 +444,13 @@ class VibeCameraPlugin : Plugin() {
                     "photo"
                 )
 
+                /*
+                 * Return a raw native path.
+                 * VibeMoments converts this with Capacitor.convertFileSrc().
+                 */
                 result.put(
                     "path",
-                    file.toURI().toString()
+                    file.absolutePath
                 )
 
                 result.put(
@@ -641,6 +670,10 @@ class VibeCameraPlugin : Plugin() {
             result
         )
     }
+
+    // -------------------------------------------------------------------------
+    // Temporary capture cleanup
+    // -------------------------------------------------------------------------
 
     @PluginMethod
     fun deleteCapture(
@@ -863,6 +896,120 @@ class VibeCameraPlugin : Plugin() {
         }
     }
 
+    // -------------------------------------------------------------------------
+    // Video preview
+    // -------------------------------------------------------------------------
+
+    /*
+     * The Camera2 video recorder uses a raw TextureView instead of CameraX's
+     * PreviewView.
+     *
+     * TextureView will otherwise stretch its source buffer to its own measured
+     * dimensions. On a tall phone this turns a 16:9 camera buffer into a
+     * stretched ~20:9 image.
+     *
+     * This transformation restores the camera buffer's aspect ratio and then
+     * scales it using a center-crop behaviour similar to PreviewView's
+     * FILL_CENTER.
+     */
+    private fun configureVideoPreviewTransform(
+        textureView: android.view.TextureView
+    ) {
+        textureView.post {
+            val viewWidth =
+                textureView.width.toFloat()
+
+            val viewHeight =
+                textureView.height.toFloat()
+
+            if (
+                viewWidth <= 0f ||
+                viewHeight <= 0f
+            ) {
+                return@post
+            }
+
+            /*
+             * Our encoded camera buffer is landscape 1280x720.
+             *
+             * When the display is portrait, the camera content is effectively
+             * viewed as a portrait 720x1280 source.
+             */
+            val sourceWidth: Float
+            val sourceHeight: Float
+
+            if (
+                viewHeight >=
+                viewWidth
+            ) {
+                sourceWidth =
+                    VIDEO_PREVIEW_HEIGHT.toFloat()
+
+                sourceHeight =
+                    VIDEO_PREVIEW_WIDTH.toFloat()
+            } else {
+                sourceWidth =
+                    VIDEO_PREVIEW_WIDTH.toFloat()
+
+                sourceHeight =
+                    VIDEO_PREVIEW_HEIGHT.toFloat()
+            }
+
+            /*
+             * Scale up enough to completely fill the destination while
+             * retaining the source aspect ratio.
+             */
+            val fillScale =
+                maxOf(
+                    viewWidth /
+                        sourceWidth,
+
+                    viewHeight /
+                        sourceHeight
+                )
+
+            val desiredWidth =
+                sourceWidth *
+                fillScale
+
+            val desiredHeight =
+                sourceHeight *
+                fillScale
+
+            /*
+             * TextureView has already stretched the source to the view.
+             * The matrix compensates for that stretch and transforms it into
+             * our desired center-cropped dimensions.
+             */
+            val scaleX =
+                desiredWidth /
+                viewWidth
+
+            val scaleY =
+                desiredHeight /
+                viewHeight
+
+            val matrix =
+                Matrix()
+
+            matrix.setScale(
+                scaleX,
+                scaleY,
+                viewWidth / 2f,
+                viewHeight / 2f
+            )
+
+            textureView.setTransform(
+                matrix
+            )
+
+            Log.d(
+                logTag,
+                "Video preview transform applied: view=${viewWidth.toInt()}x${viewHeight.toInt()}, source=${sourceWidth.toInt()}x${sourceHeight.toInt()}, scaleX=$scaleX, scaleY=$scaleY"
+            )
+        }
+    }
+
     private fun createVideoPreview(
         onReady: (Surface) -> Unit,
         onError: (Exception) -> Unit
@@ -900,7 +1047,23 @@ class VibeCameraPlugin : Plugin() {
                                 ) {
                                     Log.d(
                                         logTag,
-                                        "Video TextureView ready"
+                                        "Video TextureView ready: ${width}x${height}"
+                                    )
+
+                                    /*
+                                     * The recorder targets 720p, so configure
+                                     * the TextureView's native buffer to match
+                                     * the camera stream rather than the phone's
+                                     * screen dimensions.
+                                     */
+                                    surfaceTexture
+                                        .setDefaultBufferSize(
+                                            VIDEO_PREVIEW_WIDTH,
+                                            VIDEO_PREVIEW_HEIGHT
+                                        )
+
+                                    configureVideoPreviewTransform(
+                                        this@apply
                                     )
 
                                     videoPreviewSurface =
@@ -918,12 +1081,26 @@ class VibeCameraPlugin : Plugin() {
                                         android.graphics.SurfaceTexture,
                                     width: Int,
                                     height: Int
-                                ) {}
+                                ) {
+                                    Log.d(
+                                        logTag,
+                                        "Video TextureView size changed: ${width}x${height}"
+                                    )
+
+                                    configureVideoPreviewTransform(
+                                        this@apply
+                                    )
+                                }
 
                                 override fun onSurfaceTextureDestroyed(
                                     surfaceTexture:
                                         android.graphics.SurfaceTexture
                                 ): Boolean {
+                                    Log.d(
+                                        logTag,
+                                        "Video TextureView destroyed"
+                                    )
+
                                     videoPreviewSurface
                                         ?.release()
 
@@ -953,6 +1130,10 @@ class VibeCameraPlugin : Plugin() {
             }
         }
     }
+
+    // -------------------------------------------------------------------------
+    // Video recording
+    // -------------------------------------------------------------------------
 
     @PluginMethod
     fun startRecording(
@@ -1112,7 +1293,7 @@ class VibeCameraPlugin : Plugin() {
 
                                 result.put(
                                     "path",
-                                    file.toURI().toString()
+                                    file.absolutePath
                                 )
 
                                 result.put(
