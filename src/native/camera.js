@@ -8,7 +8,7 @@ export const Camera = {
   },
 
   stopPreview() {
-    return VibeCameraNative.stopPreview(options)
+    return VibeCameraNative.stopPreview()
   },
 
   capturePhoto(options = {}) {
@@ -37,12 +37,20 @@ export const Camera = {
 
   startRecording(options = {}) {
     return VibeCameraNative.startRecording({
-      withAudio: options.withAudio ?? false
+      withAudio: options.withAudio ?? true
     })
   },
 
   stopRecording() {
     return VibeCameraNative.stopRecording()
+  },
+
+  deleteCapture(path) {
+    return VibeCameraNative.deleteCapture({ path })
+  },
+
+  clearCache() {
+    return VibeCameraNative.clearCache()
   },
 
   addVideoRecordingFinishedListener(callback) {

@@ -6,6 +6,7 @@ export function VibeCamera({ autoStart = true, onCapture, onError }) {
     isActive,
     isCapturing,
     isRecording,
+    isStartingRecording,
     recordedVideo,
     lens,
     hasFlash,
@@ -112,7 +113,7 @@ export function VibeCamera({ autoStart = true, onCapture, onError }) {
           {isCapturing ? 'Capturing...' : 'Capture'}
         </button>
 
-        <button type="button" onClick={handleVideo} disabled={!isActive || isCapturing}>
+        <button type="button" onClick={handleVideo} disabled={!isActive || isCapturing || isStartingRecording}>
           {isRecording ? 'Stop Video' : 'Record Video'}
         </button>
       </div>

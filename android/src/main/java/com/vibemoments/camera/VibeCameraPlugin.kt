@@ -3,8 +3,10 @@ package com.vibemoments.camera
 import android.Manifest
 import android.content.pm.PackageManager
 import android.graphics.Color
+import android.net.Uri
 import android.util.Log
 import android.view.Surface
+import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
 
@@ -18,6 +20,8 @@ import com.getcapacitor.PluginMethod
 import com.getcapacitor.annotation.CapacitorPlugin
 import com.getcapacitor.annotation.Permission
 import com.getcapacitor.annotation.PermissionCallback
+
+import java.io.File
 
 @CapacitorPlugin(
     name = "VibeCamera",
@@ -47,6 +51,10 @@ class VibeCameraPlugin : Plugin() {
     private var videoRecorder: VibeVideoRecorder? = null
 
     private var pendingVideoCall: PluginCall? = null
+    private var recordingStartPending = false
+
+    private var appPaused = false
+    private var cameraXNeedsRestore = false
 
     override fun load() {
         super.load()
@@ -66,8 +74,49 @@ class VibeCameraPlugin : Plugin() {
             VibeVideoRecorder(context)
     }
 
+    override fun handleOnPause() {
+        super.handleOnPause()
+
+        appPaused = true
+
+        Log.d(
+            logTag,
+            "App paused"
+        )
+
+        try {
+            videoRecorder?.stopIfRecording()
+        } catch (exception: Exception) {
+            Log.e(
+                logTag,
+                "Unable to stop recording while app is pausing",
+                exception
+            )
+        }
+    }
+
+    override fun handleOnResume() {
+        super.handleOnResume()
+
+        appPaused = false
+
+        Log.d(
+            logTag,
+            "App resumed"
+        )
+
+        if (
+            cameraXNeedsRestore &&
+            previewView != null
+        ) {
+            restoreCameraXPreview()
+        }
+    }
+
     @PluginMethod
-    fun startPreview(call: PluginCall) {
+    fun startPreview(
+        call: PluginCall
+    ) {
         Log.d(
             logTag,
             "startPreview called"
@@ -79,7 +128,8 @@ class VibeCameraPlugin : Plugin() {
                 "Camera preview already active"
             )
 
-            val result = JSObject()
+            val result =
+                JSObject()
 
             result.put(
                 "active",
@@ -91,7 +141,10 @@ class VibeCameraPlugin : Plugin() {
                 cameraManager.currentLens()
             )
 
-            call.resolve(result)
+            call.resolve(
+                result
+            )
+
             return
         }
 
@@ -115,7 +168,9 @@ class VibeCameraPlugin : Plugin() {
             return
         }
 
-        openPreview(call)
+        openPreview(
+            call
+        )
     }
 
     @PermissionCallback
@@ -145,7 +200,9 @@ class VibeCameraPlugin : Plugin() {
             "Camera permission granted"
         )
 
-        openPreview(call)
+        openPreview(
+            call
+        )
     }
 
     private fun openPreview(
@@ -164,7 +221,9 @@ class VibeCameraPlugin : Plugin() {
                 val webViewParent =
                     webView.parent as? ViewGroup
 
-                if (webViewParent == null) {
+                if (
+                    webViewParent == null
+                ) {
                     call.reject(
                         "Unable to access WebView parent"
                     )
@@ -172,7 +231,9 @@ class VibeCameraPlugin : Plugin() {
                     return@runOnUiThread
                 }
 
-                if (previewContainer == null) {
+                if (
+                    previewContainer == null
+                ) {
                     Log.d(
                         logTag,
                         "Creating camera preview behind WebView"
@@ -199,9 +260,10 @@ class VibeCameraPlugin : Plugin() {
                                 PreviewView.ScaleType.FILL_CENTER
                         }
 
-                    previewContainer!!.addView(
-                        previewView
-                    )
+                    previewContainer!!
+                        .addView(
+                            previewView
+                        )
 
                     val webViewIndex =
                         webViewParent.indexOfChild(
@@ -296,25 +358,34 @@ class VibeCameraPlugin : Plugin() {
         )
 
         activity.runOnUiThread {
-            cameraManager.stopPreview()
-
-            videoPreviewSurface?.release()
-            videoPreviewSurface = null
-
-            videoPreviewView?.let {
-                (it.parent as? ViewGroup)
-                    ?.removeView(it)
+            try {
+                videoRecorder?.stopIfRecording()
+            } catch (
+                exception: Exception
+            ) {
+                Log.e(
+                    logTag,
+                    "Unable to stop active recording",
+                    exception
+                )
             }
 
-            videoPreviewView = null
+            cameraXNeedsRestore = false
+
+            cameraManager.stopPreview()
+
+            clearVideoPreview()
 
             previewContainer?.let {
                 (it.parent as? ViewGroup)
                     ?.removeView(it)
             }
 
-            previewView = null
-            previewContainer = null
+            previewView =
+                null
+
+            previewContainer =
+                null
 
             bridge.webView.setBackgroundColor(
                 Color.WHITE
@@ -571,6 +642,227 @@ class VibeCameraPlugin : Plugin() {
         )
     }
 
+    @PluginMethod
+    fun deleteCapture(
+        call: PluginCall
+    ) {
+        val path =
+            call.getString(
+                "path"
+            )
+                ?: run {
+                    call.reject(
+                        "Missing capture path"
+                    )
+
+                    return
+                }
+
+        try {
+            val file =
+                if (
+                    path.startsWith(
+                        "file://"
+                    )
+                ) {
+                    val parsedPath =
+                        Uri.parse(
+                            path
+                        ).path
+                            ?: throw IllegalArgumentException(
+                                "Invalid capture URI"
+                            )
+
+                    File(
+                        parsedPath
+                    )
+                } else {
+                    File(
+                        path
+                    )
+                }
+
+            val cameraCacheDirectory =
+                File(
+                    context.cacheDir,
+                    "vibemoments-camera"
+                ).canonicalFile
+
+            val captureFile =
+                file.canonicalFile
+
+            val parent =
+                captureFile.parentFile
+
+            if (
+                parent == null ||
+                parent != cameraCacheDirectory
+            ) {
+                Log.w(
+                    logTag,
+                    "Refusing to delete file outside camera cache: ${captureFile.absolutePath}"
+                )
+
+                call.reject(
+                    "Capture is not inside the VibeCamera cache"
+                )
+
+                return
+            }
+
+            if (
+                !captureFile.exists()
+            ) {
+                Log.d(
+                    logTag,
+                    "Capture already deleted: ${captureFile.absolutePath}"
+                )
+
+                val result =
+                    JSObject()
+
+                result.put(
+                    "deleted",
+                    false
+                )
+
+                result.put(
+                    "alreadyDeleted",
+                    true
+                )
+
+                call.resolve(
+                    result
+                )
+
+                return
+            }
+
+            val deleted =
+                captureFile.delete()
+
+            if (
+                !deleted
+            ) {
+                call.reject(
+                    "Unable to delete capture"
+                )
+
+                return
+            }
+
+            Log.d(
+                logTag,
+                "Deleted temporary capture: ${captureFile.absolutePath}"
+            )
+
+            val result =
+                JSObject()
+
+            result.put(
+                "deleted",
+                true
+            )
+
+            result.put(
+                "alreadyDeleted",
+                false
+            )
+
+            call.resolve(
+                result
+            )
+        } catch (
+            exception: Exception
+        ) {
+            Log.e(
+                logTag,
+                "Unable to delete temporary capture",
+                exception
+            )
+
+            call.reject(
+                "Unable to delete capture",
+                exception
+            )
+        }
+    }
+
+    @PluginMethod
+    fun clearCache(
+        call: PluginCall
+    ) {
+        try {
+            val directory =
+                File(
+                    context.cacheDir,
+                    "vibemoments-camera"
+                )
+
+            if (
+                !directory.exists()
+            ) {
+                val result =
+                    JSObject()
+
+                result.put(
+                    "deleted",
+                    0
+                )
+
+                call.resolve(
+                    result
+                )
+
+                return
+            }
+
+            var deletedCount =
+                0
+
+            directory
+                .listFiles()
+                ?.forEach { file ->
+                    if (
+                        file.isFile &&
+                        file.delete()
+                    ) {
+                        deletedCount++
+                    }
+                }
+
+            Log.d(
+                logTag,
+                "Cleared $deletedCount temporary camera files"
+            )
+
+            val result =
+                JSObject()
+
+            result.put(
+                "deleted",
+                deletedCount
+            )
+
+            call.resolve(
+                result
+            )
+        } catch (
+            exception: Exception
+        ) {
+            Log.e(
+                logTag,
+                "Unable to clear camera cache",
+                exception
+            )
+
+            call.reject(
+                "Unable to clear camera cache",
+                exception
+            )
+        }
+    }
+
     private fun createVideoPreview(
         onReady: (Surface) -> Unit,
         onError: (Exception) -> Unit
@@ -584,7 +876,7 @@ class VibeCameraPlugin : Plugin() {
                         )
 
                 previewView?.visibility =
-                    android.view.View.GONE
+                    View.GONE
 
                 videoPreviewView =
                     android.view.TextureView(
@@ -672,6 +964,24 @@ class VibeCameraPlugin : Plugin() {
         )
 
         if (
+            recordingStartPending
+        ) {
+            Log.w(
+                logTag,
+                "Ignoring duplicate startRecording call"
+            )
+
+            call.reject(
+                "Recording is already starting"
+            )
+
+            return
+        }
+
+        recordingStartPending =
+            true
+
+        if (
             ContextCompat.checkSelfPermission(
                 context,
                 Manifest.permission.RECORD_AUDIO
@@ -706,6 +1016,9 @@ class VibeCameraPlugin : Plugin() {
                 Manifest.permission.RECORD_AUDIO
             ) != PackageManager.PERMISSION_GRANTED
         ) {
+            recordingStartPending =
+                false
+
             Log.e(
                 logTag,
                 "Microphone permission denied"
@@ -741,6 +1054,9 @@ class VibeCameraPlugin : Plugin() {
                     "Beginning video recording with $currentLens camera"
                 )
 
+                cameraXNeedsRestore =
+                    true
+
                 cameraManager.pauseForVideo()
 
                 createVideoPreview(
@@ -754,6 +1070,9 @@ class VibeCameraPlugin : Plugin() {
                                 currentLens,
 
                             onStarted = {
+                                recordingStartPending =
+                                    false
+
                                 Log.d(
                                     logTag,
                                     "Video recording started"
@@ -773,6 +1092,9 @@ class VibeCameraPlugin : Plugin() {
                             },
 
                             onFinished = { file, duration ->
+                                recordingStartPending =
+                                    false
+
                                 Log.d(
                                     logTag,
                                     "Video finished: ${file.absolutePath}"
@@ -780,7 +1102,8 @@ class VibeCameraPlugin : Plugin() {
 
                                 restoreCameraXPreview()
 
-                                val result = JSObject()
+                                val result =
+                                    JSObject()
 
                                 result.put(
                                     "type",
@@ -804,7 +1127,7 @@ class VibeCameraPlugin : Plugin() {
 
                                 result.put(
                                     "videoBitrate",
-                                    5_000_000
+                                    3_000_000
                                 )
 
                                 result.put(
@@ -827,14 +1150,22 @@ class VibeCameraPlugin : Plugin() {
                                     result
                                 )
 
-                                pendingVideoCall?.resolve(
-                                    result
-                                )
+                                pendingVideoCall
+                                    ?.resolve(
+                                        result
+                                    )
 
-                                pendingVideoCall = null
+                                pendingVideoCall =
+                                    null
                             },
 
                             onError = { exception ->
+                                val failedDuringStart =
+                                    recordingStartPending
+
+                                recordingStartPending =
+                                    false
+
                                 Log.e(
                                     logTag,
                                     "Video recording failed",
@@ -843,7 +1174,8 @@ class VibeCameraPlugin : Plugin() {
 
                                 restoreCameraXPreview()
 
-                                val error = JSObject()
+                                val error =
+                                    JSObject()
 
                                 error.put(
                                     "message",
@@ -856,14 +1188,28 @@ class VibeCameraPlugin : Plugin() {
                                     error
                                 )
 
-                                pendingVideoCall?.reject(
-                                    "Video recording failed",
-                                    exception
-                                )
+                                pendingVideoCall
+                                    ?.reject(
+                                        "Video recording failed",
+                                        exception
+                                    )
 
-                                pendingVideoCall = null
+                                pendingVideoCall =
+                                    null
+
+                                if (
+                                    failedDuringStart
+                                ) {
+                                    call.reject(
+                                        "Unable to start recording",
+                                        exception
+                                    )
+                                }
                             }
                         ) ?: run {
+                            recordingStartPending =
+                                false
+
                             restoreCameraXPreview()
 
                             call.reject(
@@ -873,6 +1219,9 @@ class VibeCameraPlugin : Plugin() {
                     },
 
                     onError = { exception ->
+                        recordingStartPending =
+                            false
+
                         restoreCameraXPreview()
 
                         call.reject(
@@ -884,6 +1233,9 @@ class VibeCameraPlugin : Plugin() {
             } catch (
                 exception: Exception
             ) {
+                recordingStartPending =
+                    false
+
                 Log.e(
                     logTag,
                     "Unable to start recording",
@@ -938,27 +1290,60 @@ class VibeCameraPlugin : Plugin() {
         }
     }
 
+    private fun clearVideoPreview() {
+        videoPreviewSurface
+            ?.release()
+
+        videoPreviewSurface =
+            null
+
+        videoPreviewView?.let {
+            (it.parent as? ViewGroup)
+                ?.removeView(it)
+        }
+
+        videoPreviewView =
+            null
+
+        previewView?.visibility =
+            View.VISIBLE
+    }
+
     private fun restoreCameraXPreview() {
         activity.runOnUiThread {
-            videoPreviewSurface
-                ?.release()
+            clearVideoPreview()
 
-            videoPreviewSurface =
-                null
-
-            videoPreviewView?.let {
-                (it.parent as? ViewGroup)
-                    ?.removeView(it)
+            if (
+                !cameraXNeedsRestore
+            ) {
+                return@runOnUiThread
             }
 
-            videoPreviewView =
-                null
+            if (
+                appPaused
+            ) {
+                Log.d(
+                    logTag,
+                    "CameraX restore deferred until app resumes"
+                )
 
-            previewView?.visibility =
-                android.view.View.VISIBLE
+                return@runOnUiThread
+            }
+
+            val view =
+                previewView
+                    ?: run {
+                        cameraXNeedsRestore =
+                            false
+
+                        return@runOnUiThread
+                    }
 
             cameraManager.resumeAfterVideo(
                 onReady = {
+                    cameraXNeedsRestore =
+                        false
+
                     Log.d(
                         logTag,
                         "CameraX preview restored"

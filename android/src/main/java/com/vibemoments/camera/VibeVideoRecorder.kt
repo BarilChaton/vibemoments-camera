@@ -32,87 +32,158 @@ class VibeVideoRecorder(
     companion object {
         private const val TAG = "VibeVideoRecorder"
 
-        private const val VIDEO_MIME = MediaFormat.MIMETYPE_VIDEO_AVC
-        private const val VIDEO_BITRATE = 3_000_000
-        private const val VIDEO_FPS = 30
-        private const val VIDEO_I_FRAME_INTERVAL = 2
+        private const val VIDEO_MIME =
+            MediaFormat.MIMETYPE_VIDEO_AVC
 
-        private const val AUDIO_MIME = MediaFormat.MIMETYPE_AUDIO_AAC
-        private const val AUDIO_SAMPLE_RATE = 48_000
-        private const val AUDIO_CHANNELS = 1
-        private const val AUDIO_BITRATE = 128_000
+        private const val VIDEO_BITRATE =
+            3_000_000
 
-        private const val MAX_DURATION_MS = 30_000L
+        private const val VIDEO_FPS =
+            30
+
+        private const val VIDEO_I_FRAME_INTERVAL =
+            2
+
+        private const val AUDIO_MIME =
+            MediaFormat.MIMETYPE_AUDIO_AAC
+
+        private const val AUDIO_SAMPLE_RATE =
+            48_000
+
+        private const val AUDIO_CHANNELS =
+            1
+
+        private const val AUDIO_BITRATE =
+            128_000
+
+        private const val MAX_DURATION_MS =
+            30_000L
     }
 
     private val cameraManager =
-        context.getSystemService(Context.CAMERA_SERVICE) as CameraManager
+        context.getSystemService(
+            Context.CAMERA_SERVICE
+        ) as CameraManager
 
     private val cameraThread =
-        HandlerThread("VibeVideoCamera").apply {
+        HandlerThread(
+            "VibeVideoCamera"
+        ).apply {
             start()
         }
 
     private val cameraHandler =
-        Handler(cameraThread.looper)
+        Handler(
+            cameraThread.looper
+        )
 
     private val encoderThread =
-        HandlerThread("VibeVideoEncoder").apply {
+        HandlerThread(
+            "VibeVideoEncoder"
+        ).apply {
             start()
         }
 
     private val encoderHandler =
-        Handler(encoderThread.looper)
+        Handler(
+            encoderThread.looper
+        )
 
     private val audioThread =
-        HandlerThread("VibeVideoAudio").apply {
+        HandlerThread(
+            "VibeVideoAudio"
+        ).apply {
             start()
         }
 
     private val audioHandler =
-        Handler(audioThread.looper)
+        Handler(
+            audioThread.looper
+        )
 
-    private var cameraDevice: CameraDevice? = null
-    private var captureSession: CameraCaptureSession? = null
+    private var cameraDevice:
+        CameraDevice? = null
 
-    private var videoEncoder: MediaCodec? = null
-    private var videoEncoderSurface: Surface? = null
+    private var captureSession:
+        CameraCaptureSession? = null
 
-    private var audioEncoder: MediaCodec? = null
-    private var audioRecord: AudioRecord? = null
+    private var videoEncoder:
+        MediaCodec? = null
 
-    private var muxer: MediaMuxer? = null
-    private var muxerStarted = false
+    private var videoEncoderSurface:
+        Surface? = null
 
-    private var videoTrackIndex = -1
-    private var audioTrackIndex = -1
+    private var audioEncoder:
+        MediaCodec? = null
 
-    private var outputFile: File? = null
+    private var audioRecord:
+        AudioRecord? = null
+
+    private var muxer:
+        MediaMuxer? = null
+
+    private var muxerStarted =
+        false
+
+    private var videoTrackIndex =
+        -1
+
+    private var audioTrackIndex =
+        -1
+
+    private var outputFile:
+        File? = null
 
     @Volatile
-    private var recording = false
+    private var starting =
+        false
 
     @Volatile
-    private var stopping = false
+    private var recording =
+        false
 
-    private var recordingStartedAt = 0L
-    private var recordingStartNs = 0L
+    @Volatile
+    private var stopping =
+        false
 
-    private var videoEncoderFinished = false
-    private var audioEncoderFinished = false
-    private var audioInputEnded = false
-    private var finalized = false
+    private var recordingStartedAt =
+        0L
 
-    private var firstVideoPtsUs = -1L
-    private var firstAudioPtsUs = -1L
+    private var recordingStartNs =
+        0L
 
-    private var audioSamplesSubmitted = 0L
+    private var videoEncoderFinished =
+        false
 
-    private var onFinished: ((File, Long) -> Unit)? = null
-    private var onError: ((Exception) -> Unit)? = null
+    private var audioEncoderFinished =
+        false
 
-    private val muxerLock = Any()
-    private val finishLock = Any()
+    private var audioInputEnded =
+        false
+
+    private var finalized =
+        false
+
+    private var firstVideoPtsUs =
+        -1L
+
+    private var firstAudioPtsUs =
+        -1L
+
+    private var audioSamplesSubmitted =
+        0L
+
+    private var onFinished:
+        ((File, Long) -> Unit)? = null
+
+    private var onError:
+        ((Exception) -> Unit)? = null
+
+    private val muxerLock =
+        Any()
+
+    private val finishLock =
+        Any()
 
     private data class PendingSample(
         val track: String,
@@ -132,36 +203,65 @@ class VibeVideoRecorder(
         onFinished: (File, Long) -> Unit,
         onError: (Exception) -> Unit
     ) {
-        if (recording || stopping) {
+        if (
+            starting ||
+            recording ||
+            stopping
+        ) {
+            Log.w(
+                TAG,
+                "Recording start ignored because recorder is already busy"
+            )
+
             onError(
                 IllegalStateException(
-                    "Recording already in progress"
+                    "Recording already starting or in progress"
                 )
             )
 
             return
         }
 
+        starting =
+            true
+
         resetRecordingState()
 
-        this.onFinished = onFinished
-        this.onError = onError
+        this.onFinished =
+            onFinished
+
+        this.onError =
+            onError
 
         try {
             val cameraId =
-                findCameraId(lens)
+                findCameraId(
+                    lens
+                )
 
             val videoSize =
-                chooseVideoSize(cameraId)
+                chooseVideoSize(
+                    cameraId
+                )
 
-            Log.d(TAG, "Starting video recorder")
-            Log.d(TAG, "Camera ID: $cameraId")
+            Log.d(
+                TAG,
+                "Starting video recorder"
+            )
+
+            Log.d(
+                TAG,
+                "Camera ID: $cameraId"
+            )
+
             Log.d(
                 TAG,
                 "Video size: ${videoSize.width}x${videoSize.height}"
             )
 
-            createMuxer(cameraId)
+            createMuxer(
+                cameraId
+            )
 
             createVideoEncoder(
                 videoSize.width,
@@ -173,7 +273,10 @@ class VibeVideoRecorder(
 
             cameraManager.openCamera(
                 cameraId,
-                object : CameraDevice.StateCallback() {
+
+                object :
+                    CameraDevice.StateCallback() {
+
                     override fun onOpened(
                         camera: CameraDevice
                     ) {
@@ -182,7 +285,8 @@ class VibeVideoRecorder(
                             "Camera2 device opened"
                         )
 
-                        cameraDevice = camera
+                        cameraDevice =
+                            camera
 
                         try {
                             createVideoSession(
@@ -190,8 +294,12 @@ class VibeVideoRecorder(
                                 previewSurface,
                                 onStarted
                             )
-                        } catch (exception: Exception) {
-                            fail(exception)
+                        } catch (
+                            exception: Exception
+                        ) {
+                            fail(
+                                exception
+                            )
                         }
                     }
 
@@ -204,7 +312,23 @@ class VibeVideoRecorder(
                         )
 
                         camera.close()
-                        cameraDevice = null
+
+                        cameraDevice =
+                            null
+
+                        if (
+                            recording &&
+                            !stopping
+                        ) {
+                            Log.w(
+                                TAG,
+                                "Camera disconnected during recording, finalizing partial video"
+                            )
+
+                            stopAfterCameraLoss()
+
+                            return
+                        }
 
                         fail(
                             IllegalStateException(
@@ -217,49 +341,153 @@ class VibeVideoRecorder(
                         camera: CameraDevice,
                         error: Int
                     ) {
+                        val message =
+                            cameraErrorMessage(
+                                error
+                            )
+
                         Log.e(
                             TAG,
-                            "Camera2 error: $error"
+                            "Camera2 error $error: $message"
                         )
 
                         camera.close()
-                        cameraDevice = null
+
+                        cameraDevice =
+                            null
+
+                        if (
+                            error ==
+                            CameraDevice.StateCallback.ERROR_CAMERA_DISABLED &&
+                            recording &&
+                            !stopping
+                        ) {
+                            Log.w(
+                                TAG,
+                                "Camera disabled during recording, finalizing partial video"
+                            )
+
+                            stopAfterCameraLoss()
+
+                            return
+                        }
 
                         fail(
                             IllegalStateException(
-                                "Camera error: $error"
+                                message
                             )
                         )
                     }
                 },
+
                 cameraHandler
             )
-        } catch (exception: Exception) {
-            fail(exception)
+        } catch (
+            exception: Exception
+        ) {
+            fail(
+                exception
+            )
         }
     }
 
+    private fun cameraErrorMessage(
+        error: Int
+    ): String {
+        return when (
+            error
+        ) {
+            CameraDevice.StateCallback.ERROR_CAMERA_IN_USE ->
+                "Camera is already in use"
+
+            CameraDevice.StateCallback.ERROR_MAX_CAMERAS_IN_USE ->
+                "Maximum number of cameras already in use"
+
+            CameraDevice.StateCallback.ERROR_CAMERA_DISABLED ->
+                "Camera was disabled by the system"
+
+            CameraDevice.StateCallback.ERROR_CAMERA_DEVICE ->
+                "Camera device error"
+
+            CameraDevice.StateCallback.ERROR_CAMERA_SERVICE ->
+                "Camera service error"
+
+            else ->
+                "Unknown camera error: $error"
+        }
+    }
+
+    fun stopIfRecording() {
+        if (
+            !recording ||
+            stopping
+        ) {
+            return
+        }
+
+        Log.d(
+            TAG,
+            "Stopping recording because app entered background"
+        )
+
+        stop()
+    }
+
+    fun isRecording(): Boolean {
+        return recording
+    }
+
+    fun isBusy(): Boolean {
+        return (
+            starting ||
+            recording ||
+            stopping
+        )
+    }
+
     private fun resetRecordingState() {
-        recording = false
-        stopping = false
-        finalized = false
+        recording =
+            false
 
-        videoEncoderFinished = false
-        audioEncoderFinished = false
-        audioInputEnded = false
+        stopping =
+            false
 
-        videoTrackIndex = -1
-        audioTrackIndex = -1
+        finalized =
+            false
 
-        muxerStarted = false
+        videoEncoderFinished =
+            false
 
-        firstVideoPtsUs = -1L
-        firstAudioPtsUs = -1L
+        audioEncoderFinished =
+            false
 
-        audioSamplesSubmitted = 0L
-        recordingStartNs = 0L
+        audioInputEnded =
+            false
 
-        synchronized(muxerLock) {
+        videoTrackIndex =
+            -1
+
+        audioTrackIndex =
+            -1
+
+        muxerStarted =
+            false
+
+        firstVideoPtsUs =
+            -1L
+
+        firstAudioPtsUs =
+            -1L
+
+        audioSamplesSubmitted =
+            0L
+
+        recordingStartNs =
+            0L
+
+        synchronized(
+            muxerLock
+        ) {
             pendingSamples.clear()
         }
     }
@@ -273,10 +501,17 @@ class VibeVideoRecorder(
         return when (
             windowManager.defaultDisplay.rotation
         ) {
-            Surface.ROTATION_90 -> 90
-            Surface.ROTATION_180 -> 180
-            Surface.ROTATION_270 -> 270
-            else -> 0
+            Surface.ROTATION_90 ->
+                90
+
+            Surface.ROTATION_180 ->
+                180
+
+            Surface.ROTATION_270 ->
+                270
+
+            else ->
+                0
         }
     }
 
@@ -284,9 +519,10 @@ class VibeVideoRecorder(
         cameraId: String
     ): Int {
         val characteristics =
-            cameraManager.getCameraCharacteristics(
-                cameraId
-            )
+            cameraManager
+                .getCameraCharacteristics(
+                    cameraId
+                )
 
         val sensorOrientation =
             characteristics.get(
@@ -327,7 +563,9 @@ class VibeVideoRecorder(
                 "vibemoments-camera"
             )
 
-        if (!directory.exists()) {
+        if (
+            !directory.exists()
+        ) {
             directory.mkdirs()
         }
 
@@ -400,21 +638,23 @@ class VibeVideoRecorder(
             }
 
         videoEncoder =
-            MediaCodec.createEncoderByType(
-                VIDEO_MIME
-            ).apply {
-                configure(
-                    format,
-                    null,
-                    null,
-                    MediaCodec.CONFIGURE_FLAG_ENCODE
+            MediaCodec
+                .createEncoderByType(
+                    VIDEO_MIME
                 )
+                .apply {
+                    configure(
+                        format,
+                        null,
+                        null,
+                        MediaCodec.CONFIGURE_FLAG_ENCODE
+                    )
 
-                videoEncoderSurface =
-                    createInputSurface()
+                    videoEncoderSurface =
+                        createInputSurface()
 
-                start()
-            }
+                    start()
+                }
     }
 
     private fun createAudioEncoder() {
@@ -446,18 +686,20 @@ class VibeVideoRecorder(
             }
 
         audioEncoder =
-            MediaCodec.createEncoderByType(
-                AUDIO_MIME
-            ).apply {
-                configure(
-                    format,
-                    null,
-                    null,
-                    MediaCodec.CONFIGURE_FLAG_ENCODE
+            MediaCodec
+                .createEncoderByType(
+                    AUDIO_MIME
                 )
+                .apply {
+                    configure(
+                        format,
+                        null,
+                        null,
+                        MediaCodec.CONFIGURE_FLAG_ENCODE
+                    )
 
-                start()
-            }
+                    start()
+                }
     }
 
     @SuppressLint("MissingPermission")
@@ -469,7 +711,10 @@ class VibeVideoRecorder(
                 AudioFormat.ENCODING_PCM_16BIT
             )
 
-        if (minimumBufferSize <= 0) {
+        if (
+            minimumBufferSize <=
+            0
+        ) {
             throw IllegalStateException(
                 "Unable to determine audio buffer size"
             )
@@ -503,7 +748,10 @@ class VibeVideoRecorder(
         lens: String
     ): String {
         val wantedFacing =
-            if (lens == "front") {
+            if (
+                lens ==
+                "front"
+            ) {
                 CameraCharacteristics.LENS_FACING_FRONT
             } else {
                 CameraCharacteristics.LENS_FACING_BACK
@@ -514,9 +762,10 @@ class VibeVideoRecorder(
             cameraManager.cameraIdList
         ) {
             val characteristics =
-                cameraManager.getCameraCharacteristics(
-                    cameraId
-                )
+                cameraManager
+                    .getCameraCharacteristics(
+                        cameraId
+                    )
 
             val facing =
                 characteristics.get(
@@ -540,9 +789,10 @@ class VibeVideoRecorder(
         cameraId: String
     ): Size {
         val characteristics =
-            cameraManager.getCameraCharacteristics(
-                cameraId
-            )
+            cameraManager
+                .getCameraCharacteristics(
+                    cameraId
+                )
 
         val map =
             characteristics.get(
@@ -561,24 +811,24 @@ class VibeVideoRecorder(
                     "Camera provides no MediaCodec output sizes"
                 )
 
-        // Preferred VibeMoments recording resolution.
         sizes.firstOrNull {
-            it.width == 1280 &&
-            it.height == 720
+            it.width ==
+                1280 &&
+            it.height ==
+                720
         }?.let {
             return it
         }
 
-        // Prefer 1080p as a known-good fallback.
         sizes.firstOrNull {
-            it.width == 1920 &&
-            it.height == 1080
+            it.width ==
+                1920 &&
+            it.height ==
+                1080
         }?.let {
             return it
         }
 
-        // Otherwise choose the supported 16:9 resolution
-        // closest to 1280x720.
         val targetPixels =
             1280L * 720L
 
@@ -590,7 +840,8 @@ class VibeVideoRecorder(
                         size.height.toDouble()
 
                     kotlin.math.abs(
-                        ratio - (16.0 / 9.0)
+                        ratio -
+                        (16.0 / 9.0)
                     ) < 0.05
                 }
                 .minByOrNull { size ->
@@ -601,7 +852,10 @@ class VibeVideoRecorder(
                     )
                 }
 
-        if (closest16By9 != null) {
+        if (
+            closest16By9 !=
+            null
+        ) {
             Log.d(
                 TAG,
                 "720p unavailable, using closest 16:9 size: ${closest16By9.width}x${closest16By9.height}"
@@ -610,8 +864,6 @@ class VibeVideoRecorder(
             return closest16By9
         }
 
-        // Last-resort fallback: choose any supported resolution
-        // closest in total pixel count to 720p.
         val closest =
             sizes.minByOrNull { size ->
                 kotlin.math.abs(
@@ -651,11 +903,13 @@ class VibeVideoRecorder(
 
         camera.createCaptureSession(
             surfaces,
+
             object :
                 CameraCaptureSession.StateCallback() {
 
                 override fun onConfigured(
-                    session: CameraCaptureSession
+                    session:
+                        CameraCaptureSession
                 ) {
                     Log.d(
                         TAG,
@@ -667,28 +921,29 @@ class VibeVideoRecorder(
 
                     try {
                         val request =
-                            camera.createCaptureRequest(
-                                CameraDevice.TEMPLATE_RECORD
-                            ).apply {
-                                addTarget(
-                                    previewSurface
+                            camera
+                                .createCaptureRequest(
+                                    CameraDevice.TEMPLATE_RECORD
                                 )
+                                .apply {
+                                    addTarget(
+                                        previewSurface
+                                    )
 
-                                addTarget(
-                                    encodeSurface
-                                )
+                                    addTarget(
+                                        encodeSurface
+                                    )
 
-                                set(
-                                    CaptureRequest.CONTROL_MODE,
-                                    CameraMetadata.CONTROL_MODE_AUTO
-                                )
+                                    set(
+                                        CaptureRequest.CONTROL_MODE,
+                                        CameraMetadata.CONTROL_MODE_AUTO
+                                    )
 
-                                set(
-                                    CaptureRequest.CONTROL_AF_MODE,
-                                    CaptureRequest
-                                        .CONTROL_AF_MODE_CONTINUOUS_VIDEO
-                                )
-                            }
+                                    set(
+                                        CaptureRequest.CONTROL_AF_MODE,
+                                        CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_VIDEO
+                                    )
+                                }
 
                         session.setRepeatingRequest(
                             request.build(),
@@ -702,6 +957,9 @@ class VibeVideoRecorder(
                         recordingStartNs =
                             SystemClock.elapsedRealtimeNanos()
 
+                        starting =
+                            false
+
                         recording =
                             true
 
@@ -710,7 +968,9 @@ class VibeVideoRecorder(
 
                         cameraHandler.postDelayed(
                             {
-                                if (recording) {
+                                if (
+                                    recording
+                                ) {
                                     Log.d(
                                         TAG,
                                         "30 second recording limit reached"
@@ -719,7 +979,8 @@ class VibeVideoRecorder(
                                     try {
                                         stop()
                                     } catch (
-                                        exception: Exception
+                                        exception:
+                                            Exception
                                     ) {
                                         fail(
                                             exception
@@ -727,6 +988,7 @@ class VibeVideoRecorder(
                                     }
                                 }
                             },
+
                             MAX_DURATION_MS
                         )
 
@@ -737,7 +999,8 @@ class VibeVideoRecorder(
 
                         onStarted()
                     } catch (
-                        exception: Exception
+                        exception:
+                            Exception
                     ) {
                         fail(
                             exception
@@ -756,20 +1019,24 @@ class VibeVideoRecorder(
                     )
                 }
             },
+
             cameraHandler
         )
     }
 
     private fun startVideoDrainLoop() {
         encoderHandler.post(
-            object : Runnable {
+            object :
+                Runnable {
+
                 override fun run() {
                     try {
                         drainVideoEncoder(
                             false
                         )
                     } catch (
-                        exception: Exception
+                        exception:
+                            Exception
                     ) {
                         fail(
                             exception
@@ -778,11 +1045,14 @@ class VibeVideoRecorder(
                         return
                     }
 
-                    if (recording) {
-                        encoderHandler.postDelayed(
-                            this,
-                            5
-                        )
+                    if (
+                        recording
+                    ) {
+                        encoderHandler
+                            .postDelayed(
+                                this,
+                                5
+                            )
                     }
                 }
             }
@@ -811,29 +1081,38 @@ class VibeVideoRecorder(
         )
 
         audioHandler.post(
-            object : Runnable {
+            object :
+                Runnable {
+
                 override fun run() {
-                    if (!recording) {
+                    if (
+                        !recording
+                    ) {
                         queueAudioEndOfStream()
+
                         return
                     }
 
                     try {
                         val inputIndex =
-                            encoder.dequeueInputBuffer(
-                                10_000
-                            )
-
-                        if (
-                            inputIndex >= 0
-                        ) {
-                            val inputBuffer =
-                                encoder.getInputBuffer(
-                                    inputIndex
+                            encoder
+                                .dequeueInputBuffer(
+                                    10_000
                                 )
 
+                        if (
+                            inputIndex >=
+                            0
+                        ) {
+                            val inputBuffer =
+                                encoder
+                                    .getInputBuffer(
+                                        inputIndex
+                                    )
+
                             if (
-                                inputBuffer != null
+                                inputBuffer !=
+                                null
                             ) {
                                 inputBuffer.clear()
 
@@ -844,7 +1123,8 @@ class VibeVideoRecorder(
                                     )
 
                                 if (
-                                    bytesRead > 0
+                                    bytesRead >
+                                    0
                                 ) {
                                     val bytesPerSample =
                                         2
@@ -858,10 +1138,11 @@ class VibeVideoRecorder(
                                         AudioTimestamp()
 
                                     val timestampResult =
-                                        recorder.getTimestamp(
-                                            timestamp,
-                                            AudioTimestamp.TIMEBASE_MONOTONIC
-                                        )
+                                        recorder
+                                            .getTimestamp(
+                                                timestamp,
+                                                AudioTimestamp.TIMEBASE_MONOTONIC
+                                            )
 
                                     val ptsUs =
                                         if (
@@ -917,7 +1198,8 @@ class VibeVideoRecorder(
                             )
                         }
                     } catch (
-                        exception: Exception
+                        exception:
+                            Exception
                     ) {
                         fail(
                             exception
@@ -938,15 +1220,23 @@ class VibeVideoRecorder(
         val bufferInfo =
             MediaCodec.BufferInfo()
 
-        if (endOfStream) {
-            encoder.signalEndOfInputStream()
+        if (
+            endOfStream
+        ) {
+            encoder
+                .signalEndOfInputStream()
         }
 
-        while (true) {
+        while (
+            true
+        ) {
             val outputIndex =
                 encoder.dequeueOutputBuffer(
                     bufferInfo,
-                    if (endOfStream) {
+
+                    if (
+                        endOfStream
+                    ) {
                         10_000
                     } else {
                         0
@@ -957,7 +1247,9 @@ class VibeVideoRecorder(
                 outputIndex ==
                     MediaCodec.INFO_TRY_AGAIN_LATER -> {
 
-                    if (!endOfStream) {
+                    if (
+                        !endOfStream
+                    ) {
                         break
                     }
                 }
@@ -969,7 +1261,8 @@ class VibeVideoRecorder(
                         muxerLock
                     ) {
                         if (
-                            videoTrackIndex >= 0
+                            videoTrackIndex >=
+                            0
                         ) {
                             throw IllegalStateException(
                                 "Video encoder format changed twice"
@@ -985,9 +1278,10 @@ class VibeVideoRecorder(
                         )
 
                         videoTrackIndex =
-                            muxer!!.addTrack(
-                                format
-                            )
+                            muxer!!
+                                .addTrack(
+                                    format
+                                )
 
                         Log.d(
                             TAG,
@@ -998,11 +1292,14 @@ class VibeVideoRecorder(
                     }
                 }
 
-                outputIndex >= 0 -> {
+                outputIndex >=
+                    0 -> {
+
                     val outputBuffer =
-                        encoder.getOutputBuffer(
-                            outputIndex
-                        )
+                        encoder
+                            .getOutputBuffer(
+                                outputIndex
+                            )
 
                     if (
                         outputBuffer !=
@@ -1041,10 +1338,13 @@ class VibeVideoRecorder(
                             writeOrBufferSample(
                                 track =
                                     "video",
+
                                 buffer =
                                     outputBuffer,
+
                                 info =
                                     bufferInfo,
+
                                 presentationTimeUs =
                                     normalizedPts
                             )
@@ -1088,11 +1388,16 @@ class VibeVideoRecorder(
         val bufferInfo =
             MediaCodec.BufferInfo()
 
-        while (true) {
+        while (
+            true
+        ) {
             val outputIndex =
                 encoder.dequeueOutputBuffer(
                     bufferInfo,
-                    if (endOfStream) {
+
+                    if (
+                        endOfStream
+                    ) {
                         10_000
                     } else {
                         0
@@ -1103,7 +1408,9 @@ class VibeVideoRecorder(
                 outputIndex ==
                     MediaCodec.INFO_TRY_AGAIN_LATER -> {
 
-                    if (!endOfStream) {
+                    if (
+                        !endOfStream
+                    ) {
                         break
                     }
                 }
@@ -1132,9 +1439,10 @@ class VibeVideoRecorder(
                         )
 
                         audioTrackIndex =
-                            muxer!!.addTrack(
-                                format
-                            )
+                            muxer!!
+                                .addTrack(
+                                    format
+                                )
 
                         Log.d(
                             TAG,
@@ -1145,11 +1453,14 @@ class VibeVideoRecorder(
                     }
                 }
 
-                outputIndex >= 0 -> {
+                outputIndex >=
+                    0 -> {
+
                     val outputBuffer =
-                        encoder.getOutputBuffer(
-                            outputIndex
-                        )
+                        encoder
+                            .getOutputBuffer(
+                                outputIndex
+                            )
 
                     if (
                         outputBuffer !=
@@ -1177,10 +1488,13 @@ class VibeVideoRecorder(
                         writeOrBufferSample(
                             track =
                                 "audio",
+
                             buffer =
                                 outputBuffer,
+
                             info =
                                 bufferInfo,
+
                             presentationTimeUs =
                                 normalizedPts
                         )
@@ -1247,10 +1561,13 @@ class VibeVideoRecorder(
                     PendingSample(
                         track =
                             track,
+
                         data =
                             bytes,
+
                         presentationTimeUs =
                             presentationTimeUs,
+
                         flags =
                             info.flags
                     )
@@ -1270,20 +1587,23 @@ class VibeVideoRecorder(
                 }
 
             val writeInfo =
-                MediaCodec.BufferInfo().apply {
-                    set(
-                        0,
-                        info.size,
-                        presentationTimeUs,
-                        info.flags
-                    )
-                }
+                MediaCodec
+                    .BufferInfo()
+                    .apply {
+                        set(
+                            0,
+                            info.size,
+                            presentationTimeUs,
+                            info.flags
+                        )
+                    }
 
-            muxer!!.writeSampleData(
-                trackIndex,
-                buffer,
-                writeInfo
-            )
+            muxer!!
+                .writeSampleData(
+                    trackIndex,
+                    buffer,
+                    writeInfo
+                )
         }
     }
 
@@ -1324,7 +1644,8 @@ class VibeVideoRecorder(
         }
 
         val samples =
-            pendingSamples.toList()
+            pendingSamples
+                .toList()
 
         pendingSamples.clear()
 
@@ -1342,33 +1663,42 @@ class VibeVideoRecorder(
                 }
 
             val info =
-                MediaCodec.BufferInfo().apply {
-                    set(
-                        0,
-                        sample.data.size,
-                        sample.presentationTimeUs,
-                        sample.flags
-                    )
-                }
+                MediaCodec
+                    .BufferInfo()
+                    .apply {
+                        set(
+                            0,
+                            sample.data.size,
+                            sample.presentationTimeUs,
+                            sample.flags
+                        )
+                    }
 
-            muxer!!.writeSampleData(
-                trackIndex,
-                ByteBuffer.wrap(
-                    sample.data
-                ),
-                info
-            )
+            muxer!!
+                .writeSampleData(
+                    trackIndex,
+
+                    ByteBuffer.wrap(
+                        sample.data
+                    ),
+
+                    info
+                )
         }
     }
 
     fun stop() {
-        if (!recording) {
+        if (
+            !recording
+        ) {
             throw IllegalStateException(
                 "No recording in progress"
             )
         }
 
-        if (stopping) {
+        if (
+            stopping
+        ) {
             return
         }
 
@@ -1388,6 +1718,93 @@ class VibeVideoRecorder(
                 null
             )
 
+        closeCameraSession()
+
+        audioHandler.post {
+            try {
+                queueAudioEndOfStream()
+            } catch (
+                exception:
+                    Exception
+            ) {
+                fail(
+                    exception
+                )
+            }
+        }
+
+        encoderHandler.post {
+            try {
+                drainVideoEncoder(
+                    true
+                )
+            } catch (
+                exception:
+                    Exception
+            ) {
+                fail(
+                    exception
+                )
+            }
+        }
+    }
+
+    private fun stopAfterCameraLoss() {
+        if (
+            !recording ||
+            stopping
+        ) {
+            return
+        }
+
+        Log.d(
+            TAG,
+            "Gracefully stopping after camera loss"
+        )
+
+        stopping =
+            true
+
+        recording =
+            false
+
+        cameraHandler
+            .removeCallbacksAndMessages(
+                null
+            )
+
+        closeCameraSession()
+
+        audioHandler.post {
+            try {
+                queueAudioEndOfStream()
+            } catch (
+                exception:
+                    Exception
+            ) {
+                fail(
+                    exception
+                )
+            }
+        }
+
+        encoderHandler.post {
+            try {
+                drainVideoEncoder(
+                    true
+                )
+            } catch (
+                exception:
+                    Exception
+            ) {
+                fail(
+                    exception
+                )
+            }
+        }
+    }
+
+    private fun closeCameraSession() {
         try {
             captureSession
                 ?.stopRepeating()
@@ -1421,34 +1838,6 @@ class VibeVideoRecorder(
 
         cameraDevice =
             null
-
-        audioHandler.post {
-            try {
-                queueAudioEndOfStream()
-            } catch (
-                exception:
-                    Exception
-            ) {
-                fail(
-                    exception
-                )
-            }
-        }
-
-        encoderHandler.post {
-            try {
-                drainVideoEncoder(
-                    true
-                )
-            } catch (
-                exception:
-                    Exception
-            ) {
-                fail(
-                    exception
-                )
-            }
-        }
     }
 
     private fun queueAudioEndOfStream() {
@@ -1465,8 +1854,7 @@ class VibeVideoRecorder(
             if (
                 audioRecord
                     ?.recordingState ==
-                AudioRecord
-                    .RECORDSTATE_RECORDING
+                AudioRecord.RECORDSTATE_RECORDING
             ) {
                 audioRecord
                     ?.stop()
@@ -1567,108 +1955,10 @@ class VibeVideoRecorder(
             "Finalizing video"
         )
 
-        try {
-            videoEncoder
-                ?.stop()
-        } catch (
-            _: Exception
-        ) {}
-
-        try {
-            videoEncoder
-                ?.release()
-        } catch (
-            _: Exception
-        ) {}
-
-        videoEncoder =
-            null
-
-        try {
-            videoEncoderSurface
-                ?.release()
-        } catch (
-            _: Exception
-        ) {}
-
-        videoEncoderSurface =
-            null
-
-        try {
-            if (
-                audioRecord
-                    ?.recordingState ==
-                AudioRecord
-                    .RECORDSTATE_RECORDING
-            ) {
-                audioRecord
-                    ?.stop()
-            }
-        } catch (
-            _: Exception
-        ) {}
-
-        try {
-            audioRecord
-                ?.release()
-        } catch (
-            _: Exception
-        ) {}
-
-        audioRecord =
-            null
-
-        try {
-            audioEncoder
-                ?.stop()
-        } catch (
-            _: Exception
-        ) {}
-
-        try {
-            audioEncoder
-                ?.release()
-        } catch (
-            _: Exception
-        ) {}
-
-        audioEncoder =
-            null
-
-        synchronized(
-            muxerLock
-        ) {
-            try {
-                if (
-                    muxerStarted
-                ) {
-                    muxer
-                        ?.stop()
-                }
-            } catch (
-                exception:
-                    Exception
-            ) {
-                Log.e(
-                    TAG,
-                    "Unable to stop muxer cleanly",
-                    exception
-                )
-            }
-
-            try {
-                muxer
-                    ?.release()
-            } catch (
-                _: Exception
-            ) {}
-
-            muxer =
-                null
-
-            muxerStarted =
-                false
-        }
+        releaseRecordingResources(
+            stopMuxer =
+                true
+        )
 
         val file =
             outputFile
@@ -1707,6 +1997,9 @@ class VibeVideoRecorder(
             "File size: ${file.length()} bytes"
         )
 
+        starting =
+            false
+
         stopping =
             false
 
@@ -1725,47 +2018,41 @@ class VibeVideoRecorder(
         )
     }
 
-    private fun fail(
-        exception: Exception
+    private fun releaseRecordingResources(
+        stopMuxer: Boolean
     ) {
-        Log.e(
-            TAG,
-            "Video recorder failed",
-            exception
-        )
-
-        recording =
-            false
-
-        stopping =
-            false
-
         try {
-            captureSession
-                ?.close()
+            videoEncoder
+                ?.stop()
         } catch (
             _: Exception
         ) {}
 
-        captureSession =
+        try {
+            videoEncoder
+                ?.release()
+        } catch (
+            _: Exception
+        ) {}
+
+        videoEncoder =
             null
 
         try {
-            cameraDevice
-                ?.close()
+            videoEncoderSurface
+                ?.release()
         } catch (
             _: Exception
         ) {}
 
-        cameraDevice =
+        videoEncoderSurface =
             null
 
         try {
             if (
                 audioRecord
                     ?.recordingState ==
-                AudioRecord
-                    .RECORDSTATE_RECORDING
+                AudioRecord.RECORDSTATE_RECORDING
             ) {
                 audioRecord
                     ?.stop()
@@ -1801,46 +2088,30 @@ class VibeVideoRecorder(
         audioEncoder =
             null
 
-        try {
-            videoEncoder
-                ?.stop()
-        } catch (
-            _: Exception
-        ) {}
-
-        try {
-            videoEncoder
-                ?.release()
-        } catch (
-            _: Exception
-        ) {}
-
-        videoEncoder =
-            null
-
-        try {
-            videoEncoderSurface
-                ?.release()
-        } catch (
-            _: Exception
-        ) {}
-
-        videoEncoderSurface =
-            null
-
         synchronized(
             muxerLock
         ) {
-            try {
-                if (
-                    muxerStarted
+            if (
+                stopMuxer
+            ) {
+                try {
+                    if (
+                        muxerStarted
+                    ) {
+                        muxer
+                            ?.stop()
+                    }
+                } catch (
+                    exception:
+                        Exception
                 ) {
-                    muxer
-                        ?.stop()
+                    Log.e(
+                        TAG,
+                        "Unable to stop muxer cleanly",
+                        exception
+                    )
                 }
-            } catch (
-                _: Exception
-            ) {}
+            }
 
             try {
                 muxer
@@ -1854,7 +2125,37 @@ class VibeVideoRecorder(
 
             muxerStarted =
                 false
+        }
+    }
 
+    private fun fail(
+        exception: Exception
+    ) {
+        Log.e(
+            TAG,
+            "Video recorder failed",
+            exception
+        )
+
+        starting =
+            false
+
+        recording =
+            false
+
+        stopping =
+            false
+
+        closeCameraSession()
+
+        releaseRecordingResources(
+            stopMuxer =
+                true
+        )
+
+        synchronized(
+            muxerLock
+        ) {
             pendingSamples.clear()
         }
 

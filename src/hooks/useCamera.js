@@ -10,6 +10,7 @@ export function useCamera() {
   const [hasFlash, setHasFlash] = useState(false)
   const [error, setError] = useState(null)
   const [isRecording, setIsRecording] = useState(false)
+  const [isStartingRecording, setIsStartingRecording] = useState(false)
   const [recordedVideo, setRecordedVideo] = useState(null)
 
   const start = useCallback(async () => {
@@ -119,9 +120,12 @@ export function useCamera() {
   const startRecording = useCallback(async () => {
     try {
       setError(null)
+      setIsStartingRecording(true)
+
+      console.log('[VibeCamera] starting video recording')
 
       const result = await Camera.startRecording({
-        withAudio: false
+        withAudio: true
       })
 
       setIsRecording(true)
@@ -131,6 +135,8 @@ export function useCamera() {
       setError(err)
       setIsRecording(false)
       throw err
+    } finally {
+      setIsStartingRecording(false)
     }
   }, [])
 
@@ -194,6 +200,7 @@ export function useCamera() {
     torchEnabled,
     flashMode,
     recordedVideo,
+    isStartingRecording,
 
     start,
     stop,
