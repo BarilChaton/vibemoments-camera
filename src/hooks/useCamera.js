@@ -5,6 +5,9 @@ export function useCamera() {
   const [isActive, setIsActive] = useState(false)
   const [isCapturing, setIsCapturing] = useState(false)
   const [lens, setLens] = useState('back')
+  const [torchEnabled, setTorchEnabled] = useState(false)
+  const [flashMode, setFlashModeState] = useState('off')
+  const [hasFlash, setHasFlash] = useState(false)
   const [error, setError] = useState(null)
 
   const start = useCallback(async () => {
@@ -19,8 +22,9 @@ export function useCamera() {
         lens
       })
 
-      console.log('[VibeCamera] native startPreview result:', result)
+      const capabilities = await Camera.getCapabilities()
 
+      setHasFlash(capabilities?.hasFlash === true)
       setIsActive(true)
     } catch (err) {
       console.error('[VibeCamera] start failed:', err)
@@ -64,6 +68,45 @@ export function useCamera() {
         setLens(result.lens)
       }
 
+      const capabilities = await Camera.getCapabilities()
+
+      setHasFlash(capabilities?.hasFlash === true)
+
+      if (!capabilities?.hasFlash) {
+        setTorchEnabled(false)
+        setFlashModeState('off')
+      }
+
+      return result
+    } catch (err) {
+      setError(err)
+      throw err
+    }
+  }, [])
+
+  const setTorch = useCallback(async (enabled) => {
+    try {
+      setError(null)
+
+      const result = await Camera.setTorch(enabled)
+
+      setTorchEnabled(result.enabled)
+
+      return result
+    } catch (err) {
+      setError(err)
+      throw err
+    }
+  }, [])
+
+  const setFlashMode = useCallback(async (mode) => {
+    try {
+      setError(null)
+
+      const result = await Camera.setFlashMode(mode)
+
+      setFlashModeState(result.mode)
+
       return result
     } catch (err) {
       setError(err)
@@ -82,9 +125,16 @@ export function useCamera() {
     isCapturing,
     lens,
     error,
+
+    hasFlash,
+    torchEnabled,
+    flashMode,
+
     start,
     stop,
     capturePhoto,
-    switchCamera
+    switchCamera,
+    setTorch,
+    setFlashMode
   }
 }

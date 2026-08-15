@@ -21,5 +21,17 @@ export const Camera = {
 
   getCameraState() {
     return VibeCameraNative.getCameraState()
+  },
+
+  setTorch(enabled) {
+    return VibeCameraNative.setTorch({ enabled })
+  },
+
+  setFlashMode(mode) {
+    return VibeCameraNative.setFlashMode({ mode })
+  },
+
+  getCapabilities() {
+    return VibeCameraNative.getCapabilities()
   }
 }

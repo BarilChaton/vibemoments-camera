@@ -256,4 +256,64 @@ class VibeCameraPlugin : Plugin() {
 
         call.resolve(result)
     }
+
+    @PluginMethod
+    fun setTorch(call: PluginCall) {
+        val enabled = call.getBoolean("enabled") ?: false
+
+        Log.d(tag, "setTorch called: $enabled")
+
+        activity.runOnUiThread {
+            try {
+                cameraManager.setTorch(enabled)
+
+                val result = JSObject()
+                result.put("enabled", enabled)
+
+                call.resolve(result)
+            } catch (exception: Exception) {
+                Log.e(tag, "Unable to set torch", exception)
+
+                call.reject(
+                    "Unable to set torch",
+                    exception
+                )
+            }
+        }
+    }
+
+    @PluginMethod
+    fun setFlashMode(call: PluginCall) {
+        val mode = call.getString("mode") ?: "off"
+
+        Log.d(tag, "setFlashMode called: $mode")
+
+        activity.runOnUiThread {
+            try {
+                val resultMode = cameraManager.setFlashMode(mode)
+
+                val result = JSObject()
+                result.put("mode", resultMode)
+
+                call.resolve(result)
+            } catch (exception: Exception) {
+                Log.e(tag, "Unable to set flash mode", exception)
+
+                call.reject(
+                    "Unable to set flash mode",
+                    exception
+                )
+            }
+        }
+    }
+
+    @PluginMethod
+    fun getCapabilities(call: PluginCall) {
+        val result = JSObject()
+
+        result.put("hasFlash", cameraManager.hasFlash())
+        result.put("lens", cameraManager.currentLens())
+
+        call.resolve(result)
+    }
 }

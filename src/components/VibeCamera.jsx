@@ -2,7 +2,20 @@ import { useEffect, useRef } from 'react'
 import { useCamera } from '../hooks/useCamera'
 
 export function VibeCamera({ autoStart = true, onCapture, onError }) {
-  const { isActive, isCapturing, start, stop, capturePhoto, switchCamera } = useCamera()
+  const {
+    isActive,
+    isCapturing,
+    lens,
+    hasFlash,
+    torchEnabled,
+    flashMode,
+    start,
+    stop,
+    capturePhoto,
+    switchCamera,
+    setTorch,
+    setFlashMode
+  } = useCamera()
   const hasStarted = useRef(false)
 
   useEffect(() => {
@@ -41,6 +54,24 @@ export function VibeCamera({ autoStart = true, onCapture, onError }) {
         <button type="button" onClick={handleCapture} disabled={!isActive || isCapturing}>
           {isCapturing ? 'Capturing...' : 'Capture'}
         </button>
+
+        {hasFlash && (
+          <button type="button" onClick={() => setTorch(!torchEnabled)}>
+            Torch: {torchEnabled ? 'On' : 'Off'}
+          </button>
+        )}
+
+        {hasFlash && (
+          <button
+            type="button"
+            onClick={() => {
+              const next = flashMode === 'off' ? 'auto' : flashMode === 'auto' ? 'on' : 'off'
+
+              setFlashMode(next)
+            }}>
+            Flash: {flashMode}
+          </button>
+        )}
       </div>
     </div>
   )

@@ -2,6 +2,7 @@ package com.vibemoments.camera
 
 import android.content.Context
 import androidx.camera.core.CameraSelector
+import androidx.camera.core.Camera
 import androidx.camera.core.ImageCapture
 import androidx.camera.core.ImageCaptureException
 import androidx.camera.core.Preview
@@ -20,6 +21,7 @@ class VibeCameraManager(
     private var cameraProvider: ProcessCameraProvider? = null
     private var imageCapture: ImageCapture? = null
     private var previewView: PreviewView? = null
+    private var camera: Camera? = null
 
     private var lensFacing = CameraSelector.LENS_FACING_BACK
 
@@ -64,7 +66,7 @@ class VibeCameraManager(
 
         provider.unbindAll()
 
-        provider.bindToLifecycle(
+        camera = provider.bindToLifecycle(
             lifecycleOwner,
             cameraSelector,
             preview,
@@ -85,7 +87,10 @@ class VibeCameraManager(
     }
 
     fun stopPreview() {
+        camera?.cameraControl?.enableTorch(false)
         cameraProvider?.unbindAll()
+
+        camera = null
         previewView = null
         imageCapture = null
     }
@@ -181,6 +186,74 @@ class VibeCameraManager(
                     onError(exception)
                 }
             }
+        )
+    }
+
+    fun hasFlash(): Boolean {
+        return camera?.cameraInfo?.hasFlashUnit() == true
+    }
+
+    fun setTorch(enabled: Boolean) {
+        val activeCamera = camera 
+            ?: throw IllegalStateException("Camera is not active")
+
+        if (!activeCamera.cameraInfo.hasFlashUnit()) {
+            throw IllegalStateException("Current camera has no flash unit")
+        }
+
+        Log.d("VibeCameraManager", "Setting torch: $enabled")
+
+        activeCamera.cameraControl.enableTorch(enabled)
+    }
+
+    fun setFlashMode(mode: String): String {
+        val capture = imageCapture
+            ?: throw IllegalStateException("Camera is not active")
+
+        val flashMode = when (mode) {
+            "on" -> ImageCapture.FLASH_MODE_ON
+            "auto" -> ImageCapture.FLASH_MODE_AUTO
+            "off" -> ImageCapture.FLASH_MODE_OFF
+            else -> throw IllegalArgumentException("Invalid flash mode: $mode")
+        }
+
+        capture.flashMode = flashMode
+
+        Log.d("VibeCameraManager", "Flash mode set to: $mode")
+
+        return mode
+    }
+
+    fun pauseForVideo() {
+        Log.d(
+            "VibeCameraManager",
+            "Pausing CameraX for video recording"
+        )
+
+        cameraProvider?.unbindAll()
+
+        camera = null
+        imageCapture = null
+    }
+
+    fun resumeAfterVideo(
+        onReady: () -> Unit,
+        onError: (Exception) -> Unit
+    ) {
+        val view = previewView
+            ?: run {
+                onError(
+                    IllegalStateException(
+                        "PreviewView is unavailable"
+                    )
+                )
+                return
+            }
+
+        startPreview(
+            view,
+            onReady,
+            onError
         )
     }
 }
