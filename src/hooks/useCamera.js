@@ -10,6 +10,7 @@ export function useCamera() {
   const [hasFlash, setHasFlash] = useState(false)
   const [error, setError] = useState(null)
   const [isRecording, setIsRecording] = useState(false)
+  const [recordedVideo, setRecordedVideo] = useState(null)
 
   const start = useCallback(async () => {
     console.log('[VibeCamera] useCamera.start called')
@@ -137,11 +138,9 @@ export function useCamera() {
     try {
       setError(null)
 
-      const result = await Camera.stopRecording()
+      console.log('[VibeCamera] requesting video stop')
 
-      setIsRecording(false)
-
-      return result
+      await Camera.stopRecording()
     } catch (err) {
       setError(err)
       setIsRecording(false)
@@ -155,6 +154,35 @@ export function useCamera() {
     }
   }, [isActive])
 
+  useEffect(() => {
+    let finishedListener
+    let errorListener
+
+    async function setupRecordingListeners() {
+      finishedListener = await Camera.addVideoRecordingFinishedListener((video) => {
+        console.log('[VibeCamera] video recording finished', video)
+
+        setIsRecording(false)
+        setRecordedVideo(video)
+      })
+
+      errorListener = await Camera.addVideoRecordingErrorListener((event) => {
+        console.error('[VibeCamera] video recording error', event)
+
+        setIsRecording(false)
+
+        setError(new Error(event?.message || 'Video recording failed'))
+      })
+    }
+
+    setupRecordingListeners()
+
+    return () => {
+      finishedListener?.remove()
+      errorListener?.remove()
+    }
+  }, [])
+
   return {
     isActive,
     isCapturing,
@@ -165,6 +193,7 @@ export function useCamera() {
     hasFlash,
     torchEnabled,
     flashMode,
+    recordedVideo,
 
     start,
     stop,

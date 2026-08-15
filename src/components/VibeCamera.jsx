@@ -6,6 +6,7 @@ export function VibeCamera({ autoStart = true, onCapture, onError }) {
     isActive,
     isCapturing,
     isRecording,
+    recordedVideo,
     lens,
     hasFlash,
     torchEnabled,
@@ -51,6 +52,12 @@ export function VibeCamera({ autoStart = true, onCapture, onError }) {
     return () => clearInterval(interval)
   }, [isRecording])
 
+  useEffect(() => {
+    if (!recordedVideo) return
+
+    onCapture?.(recordedVideo)
+  }, [recordedVideo])
+
   async function handleCapture() {
     try {
       const media = await capturePhoto()
@@ -67,39 +74,17 @@ export function VibeCamera({ autoStart = true, onCapture, onError }) {
         return
       }
 
-      const video = await stopRecording()
-
-      console.log('VIDEO CAPTURED:', video)
-
-      onCapture?.(video)
+      await stopRecording()
     } catch (error) {
-      console.error('VIDEO ERROR:', error)
-
       onError?.(error)
     }
   }
 
   return (
-    <div className="vibemoments-camera">
-      <div id="vibemoments-camera-preview" className="vibemoments-camera-preview" />
-
-      {isRecording && <div className="vibemoments-camera-recording-time">REC {recordingSeconds}s / 30s</div>}
-
-      <div className="vibemoments-camera-controls">
-        <button type="button" onClick={switchCamera} disabled={!isActive || isRecording}>
-          Flip
-        </button>
-
-        <button type="button" onClick={handleCapture} disabled={!isActive || isCapturing}>
-          {isCapturing ? 'Capturing...' : 'Capture'}
-        </button>
-
-        <button type="button" onClick={handleVideo} disabled={!isActive || isCapturing}>
-          {isRecording ? 'Stop Video' : 'Record Video'}
-        </button>
-
+    <div className="vibemoments-camera-controls">
+      <div className="vibemoments-camera-top-controls">
         {hasFlash && (
-          <button type="button" onClick={() => setTorch(!torchEnabled)}>
+          <button type="button" onClick={() => setTorch(!torchEnabled)} disabled={isRecording}>
             Torch: {torchEnabled ? 'On' : 'Off'}
           </button>
         )}
@@ -111,10 +96,25 @@ export function VibeCamera({ autoStart = true, onCapture, onError }) {
               const next = flashMode === 'off' ? 'auto' : flashMode === 'auto' ? 'on' : 'off'
 
               setFlashMode(next)
-            }}>
+            }}
+            disabled={isRecording}>
             Flash: {flashMode}
           </button>
         )}
+      </div>
+
+      <div className="vibemoments-camera-main-controls">
+        <button type="button" onClick={switchCamera} disabled={!isActive || isRecording}>
+          Flip
+        </button>
+
+        <button type="button" onClick={handleCapture} disabled={!isActive || isCapturing || isRecording}>
+          {isCapturing ? 'Capturing...' : 'Capture'}
+        </button>
+
+        <button type="button" onClick={handleVideo} disabled={!isActive || isCapturing}>
+          {isRecording ? 'Stop Video' : 'Record Video'}
+        </button>
       </div>
     </div>
   )

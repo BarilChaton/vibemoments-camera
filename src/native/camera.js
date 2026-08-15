@@ -43,5 +43,13 @@ export const Camera = {
 
   stopRecording() {
     return VibeCameraNative.stopRecording()
+  },
+
+  addVideoRecordingFinishedListener(callback) {
+    return VibeCameraNative.addListener('videoRecordingFinished', callback)
+  },
+
+  addVideoRecordingErrorListener(callback) {
+    return VibeCameraNative.addListener('videoRecordingError', callback)
   }
 }
