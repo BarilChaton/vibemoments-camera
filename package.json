@@ -1,5 +1,5 @@
 {
-  "name": "vibemoments-camera",
+  "name": "@barilchaton/vibemoments-camera",
   "version": "0.1.6",
   "description": "Native camera engine and React components for VibeMoments",
   "type": "module",
@@ -16,6 +16,13 @@
     "android/consumer-rules.pro",
     "android/src"
   ],
+    "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/BarilChaton/vibemoments-camera.git"
+  },
   "capacitor": {
     "android": {
       "src": "android"
