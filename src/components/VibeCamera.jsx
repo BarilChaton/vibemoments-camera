@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { FiCamera, FiRefreshCw, FiZap, FiX } from 'react-icons/fi'
 import { useCamera } from '../hooks/useCamera'
 
-export function VibeCamera({ autoStart = true, onCapture, onError, onClose }) {
+export function VibeCamera({ autoStart = true, captureSession = null, initialMode = 'photo', onCapture, onError, onClose }) {
   const {
     isActive,
     isCapturing,
@@ -25,7 +25,7 @@ export function VibeCamera({ autoStart = true, onCapture, onError, onClose }) {
 
   const hasStarted = useRef(false)
 
-  const [mode, setMode] = useState('photo')
+  const [mode, setMode] = useState(initialMode)
   const [recordingSeconds, setRecordingSeconds] = useState(0)
 
   useEffect(() => {
@@ -78,7 +78,12 @@ export function VibeCamera({ autoStart = true, onCapture, onError, onClose }) {
 
   const handlePhoto = async () => {
     try {
-      const media = await capturePhoto()
+      const media = await capturePhoto({
+        captureSessionId: captureSession?.captureSessionId ?? null,
+        nonce: captureSession?.nonce ?? null
+      })
+
+      console.log('VibeCamera photo captured:', media)
 
       onCapture?.(media)
     } catch (error) {
@@ -93,7 +98,10 @@ export function VibeCamera({ autoStart = true, onCapture, onError, onClose }) {
         return
       }
 
-      await startRecording()
+      await startRecording({
+        captureSessionId: captureSession?.captureSessionId ?? null,
+        nonce: captureSession?.nonce ?? null
+      })
     } catch (error) {
       onError?.(error)
     }

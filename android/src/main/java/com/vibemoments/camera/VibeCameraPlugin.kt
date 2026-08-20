@@ -63,6 +63,15 @@ class VibeCameraPlugin : Plugin() {
     private var pendingVideoCall: PluginCall? = null
     private var recordingStartPending = false
 
+    /*
+     * Capture proof associated with the currently active video recording.
+     *
+     * Video recording is asynchronous, so these values must survive from
+     * startRecording() until the MP4 has been completely finalized.
+     */
+    private var activeVideoCaptureSessionId: String? = null
+    private var activeVideoNonce: String? = null
+
     private var appPaused = false
     private var cameraXNeedsRestore = false
 
@@ -123,6 +132,10 @@ class VibeCameraPlugin : Plugin() {
             restoreCameraXPreview()
         }
     }
+
+    // -------------------------------------------------------------------------
+    // Preview
+    // -------------------------------------------------------------------------
 
     @PluginMethod
     fun startPreview(call: PluginCall) {
@@ -261,17 +274,9 @@ class VibeCameraPlugin : Plugin() {
                                     FrameLayout.LayoutParams.MATCH_PARENT,
                                 )
 
-                            /*
-                             * CameraX handles the aspect ratio and cropping
-                             * for the normal photo preview.
-                             */
                             scaleType =
                                 PreviewView.ScaleType.FILL_CENTER
 
-                            /*
-                             * TextureView based mode behaves better with our
-                             * native-preview-behind-WebView architecture.
-                             */
                             implementationMode =
                                 PreviewView.ImplementationMode.COMPATIBLE
                         }
@@ -407,11 +412,30 @@ class VibeCameraPlugin : Plugin() {
         }
     }
 
+    // -------------------------------------------------------------------------
+    // Photo
+    // -------------------------------------------------------------------------
+
     @PluginMethod
     fun capturePhoto(call: PluginCall) {
         Log.d(
             logTag,
             "capturePhoto called",
+        )
+
+        val captureSessionId =
+            call.getString(
+                "captureSessionId",
+            )
+
+        val nonce =
+            call.getString(
+                "nonce",
+            )
+
+        Log.d(
+            logTag,
+            "Capture session ID: $captureSessionId",
         )
 
         cameraManager.capturePhoto(
@@ -421,36 +445,77 @@ class VibeCameraPlugin : Plugin() {
                     "Photo captured: ${file.absolutePath}",
                 )
 
-                val result =
-                    JSObject()
+                try {
+                    val sha256 =
+                        CaptureHasher.sha256(
+                            file,
+                        )
 
-                result.put(
-                    "type",
-                    "photo",
-                )
+                    Log.d(
+                        logTag,
+                        "Photo SHA-256: $sha256",
+                    )
 
-                /*
-                 * Return a raw native path.
-                 * VibeMoments converts this with Capacitor.convertFileSrc().
-                 */
-                result.put(
-                    "path",
-                    file.absolutePath,
-                )
+                    val result =
+                        JSObject()
 
-                result.put(
-                    "mimeType",
-                    "image/jpeg",
-                )
+                    result.put(
+                        "type",
+                        "photo",
+                    )
 
-                result.put(
-                    "lens",
-                    cameraManager.currentLens(),
-                )
+                    result.put(
+                        "path",
+                        file.absolutePath,
+                    )
 
-                call.resolve(
-                    result,
-                )
+                    result.put(
+                        "mimeType",
+                        "image/jpeg",
+                    )
+
+                    result.put(
+                        "lens",
+                        cameraManager.currentLens(),
+                    )
+
+                    result.put(
+                        "sha256",
+                        sha256,
+                    )
+
+                    result.put(
+                        "captureSessionId",
+                        captureSessionId,
+                    )
+
+                    result.put(
+                        "nonce",
+                        nonce,
+                    )
+
+                    Log.d(
+                        logTag,
+                        "Returning capture proof: session=$captureSessionId",
+                    )
+
+                    call.resolve(
+                        result,
+                    )
+                } catch (
+                    exception: Exception,
+                ) {
+                    Log.e(
+                        logTag,
+                        "Unable to hash captured photo",
+                        exception,
+                    )
+
+                    call.reject(
+                        "Unable to process captured photo",
+                        exception,
+                    )
+                }
             },
             onError = { exception ->
                 Log.e(
@@ -466,6 +531,10 @@ class VibeCameraPlugin : Plugin() {
             },
         )
     }
+
+    // -------------------------------------------------------------------------
+    // Camera controls
+    // -------------------------------------------------------------------------
 
     @PluginMethod
     fun switchCamera(call: PluginCall) {
@@ -871,18 +940,6 @@ class VibeCameraPlugin : Plugin() {
     // Video preview
     // -------------------------------------------------------------------------
 
-    /*
-     * The Camera2 video recorder uses a raw TextureView instead of CameraX's
-     * PreviewView.
-     *
-     * TextureView will otherwise stretch its source buffer to its own measured
-     * dimensions. On a tall phone this turns a 16:9 camera buffer into a
-     * stretched ~20:9 image.
-     *
-     * This transformation restores the camera buffer's aspect ratio and then
-     * scales it using a center-crop behaviour similar to PreviewView's
-     * FILL_CENTER.
-     */
     private fun configureVideoPreviewTransform(textureView: android.view.TextureView) {
         textureView.post {
             val viewWidth =
@@ -898,12 +955,6 @@ class VibeCameraPlugin : Plugin() {
                 return@post
             }
 
-            /*
-             * Our encoded camera buffer is landscape 1280x720.
-             *
-             * When the display is portrait, the camera content is effectively
-             * viewed as a portrait 720x1280 source.
-             */
             val sourceWidth: Float
             val sourceHeight: Float
 
@@ -924,10 +975,6 @@ class VibeCameraPlugin : Plugin() {
                     VIDEO_PREVIEW_HEIGHT.toFloat()
             }
 
-            /*
-             * Scale up enough to completely fill the destination while
-             * retaining the source aspect ratio.
-             */
             val fillScale =
                 maxOf(
                     viewWidth /
@@ -944,11 +991,6 @@ class VibeCameraPlugin : Plugin() {
                 sourceHeight *
                     fillScale
 
-            /*
-             * TextureView has already stretched the source to the view.
-             * The matrix compensates for that stretch and transforms it into
-             * our desired center-cropped dimensions.
-             */
             val scaleX =
                 desiredWidth /
                     viewWidth
@@ -1017,12 +1059,6 @@ class VibeCameraPlugin : Plugin() {
                                             "Video TextureView ready: ${width}x$height",
                                         )
 
-                                    /*
-                                     * The recorder targets 720p, so configure
-                                     * the TextureView's native buffer to match
-                                     * the camera stream rather than the phone's
-                                     * screen dimensions.
-                                     */
                                         surfaceTexture
                                             .setDefaultBufferSize(
                                                 VIDEO_PREVIEW_WIDTH,
@@ -1073,7 +1109,8 @@ class VibeCameraPlugin : Plugin() {
                                         return true
                                     }
 
-                                    override fun onSurfaceTextureUpdated(surfaceTexture: android.graphics.SurfaceTexture) {}
+                                    override fun onSurfaceTextureUpdated(surfaceTexture: android.graphics.SurfaceTexture) {
+                                    }
                                 }
                         }
 
@@ -1089,6 +1126,18 @@ class VibeCameraPlugin : Plugin() {
                 )
             }
         }
+    }
+
+    // -------------------------------------------------------------------------
+    // Video capture proof
+    // -------------------------------------------------------------------------
+
+    private fun clearVideoCaptureProof() {
+        activeVideoCaptureSessionId =
+            null
+
+        activeVideoNonce =
+            null
     }
 
     // -------------------------------------------------------------------------
@@ -1116,6 +1165,43 @@ class VibeCameraPlugin : Plugin() {
 
             return
         }
+
+        val captureSessionId =
+            call.getString(
+                "captureSessionId",
+            )
+
+        val nonce =
+            call.getString(
+                "nonce",
+            )
+
+        if (
+            captureSessionId.isNullOrBlank() ||
+            nonce.isNullOrBlank()
+        ) {
+            Log.e(
+                logTag,
+                "Video recording rejected because capture proof is missing",
+            )
+
+            call.reject(
+                "Missing capture session proof",
+            )
+
+            return
+        }
+
+        activeVideoCaptureSessionId =
+            captureSessionId
+
+        activeVideoNonce =
+            nonce
+
+        Log.d(
+            logTag,
+            "Video capture session ID: $captureSessionId",
+        )
 
         recordingStartPending =
             true
@@ -1155,6 +1241,8 @@ class VibeCameraPlugin : Plugin() {
         ) {
             recordingStartPending =
                 false
+
+            clearVideoCaptureProof()
 
             Log.e(
                 logTag,
@@ -1232,63 +1320,155 @@ class VibeCameraPlugin : Plugin() {
                                     "Video finished: ${file.absolutePath}",
                                 )
 
-                                restoreCameraXPreview()
+                                try {
+                                    /*
+                                     * The MP4 is completely finalized by the
+                                     * recorder before this callback fires.
+                                     *
+                                     * Hashing here ensures the fingerprint is
+                                     * calculated from the exact bytes that will
+                                     * later be uploaded.
+                                     */
+                                    val sha256 =
+                                        CaptureHasher.sha256(
+                                            file,
+                                        )
 
-                                val result =
-                                    JSObject()
+                                    Log.d(
+                                        logTag,
+                                        "Video SHA-256: $sha256",
+                                    )
 
-                                result.put(
-                                    "type",
-                                    "video",
-                                )
+                                    val captureSessionId =
+                                        activeVideoCaptureSessionId
 
-                                result.put(
-                                    "path",
-                                    file.absolutePath,
-                                )
+                                    val nonce =
+                                        activeVideoNonce
 
-                                result.put(
-                                    "mimeType",
-                                    "video/mp4",
-                                )
+                                    if (
+                                        captureSessionId.isNullOrBlank() ||
+                                        nonce.isNullOrBlank()
+                                    ) {
+                                        throw IllegalStateException(
+                                            "Video capture proof is unavailable",
+                                        )
+                                    }
 
-                                result.put(
-                                    "durationMs",
-                                    duration,
-                                )
+                                    restoreCameraXPreview()
 
-                                result.put(
-                                    "videoBitrate",
-                                    3_000_000,
-                                )
+                                    val result =
+                                        JSObject()
 
-                                result.put(
-                                    "audioBitrate",
-                                    128_000,
-                                )
+                                    result.put(
+                                        "type",
+                                        "video",
+                                    )
 
-                                result.put(
-                                    "lens",
-                                    currentLens,
-                                )
+                                    result.put(
+                                        "path",
+                                        file.absolutePath,
+                                    )
 
-                                Log.d(
-                                    logTag,
-                                    "Sending videoRecordingFinished event",
-                                )
+                                    result.put(
+                                        "mimeType",
+                                        "video/mp4",
+                                    )
 
-                                notifyListeners(
-                                    "videoRecordingFinished",
-                                    result,
-                                )
+                                    result.put(
+                                        "durationMs",
+                                        duration,
+                                    )
 
-                                pendingVideoCall
-                                    ?.resolve(
+                                    result.put(
+                                        "videoBitrate",
+                                        3_000_000,
+                                    )
+
+                                    result.put(
+                                        "audioBitrate",
+                                        128_000,
+                                    )
+
+                                    result.put(
+                                        "lens",
+                                        currentLens,
+                                    )
+
+                                    result.put(
+                                        "sha256",
+                                        sha256,
+                                    )
+
+                                    result.put(
+                                        "captureSessionId",
+                                        captureSessionId,
+                                    )
+
+                                    result.put(
+                                        "nonce",
+                                        nonce,
+                                    )
+
+                                    Log.d(
+                                        logTag,
+                                        "Returning video capture proof: session=$captureSessionId",
+                                    )
+
+                                    clearVideoCaptureProof()
+
+                                    Log.d(
+                                        logTag,
+                                        "Sending videoRecordingFinished event",
+                                    )
+
+                                    notifyListeners(
+                                        "videoRecordingFinished",
                                         result,
                                     )
 
-                                pendingVideoCall =
-                                    null
+                                    pendingVideoCall
+                                        ?.resolve(
+                                            result,
+                                        )
+
+                                    pendingVideoCall =
+                                        null
+                                } catch (
+                                    exception: Exception,
+                                ) {
+                                    Log.e(
+                                        logTag,
+                                        "Unable to process recorded video",
+                                        exception,
+                                    )
+
+                                    clearVideoCaptureProof()
+
+                                    restoreCameraXPreview()
+
+                                    val error =
+                                        JSObject()
+
+                                    error.put(
+                                        "message",
+                                        exception.message
+                                            ?: "Unable to process recorded video",
+                                    )
+
+                                    notifyListeners(
+                                        "videoRecordingError",
+                                        error,
+                                    )
+
+                                    pendingVideoCall
+                                        ?.reject(
+                                            "Unable to process recorded video",
+                                            exception,
+                                        )
+
+                                    pendingVideoCall =
+                                        null
+                                }
                             },
                             onError = { exception ->
                                 val failedDuringStart =
@@ -1296,6 +1476,8 @@ class VibeCameraPlugin : Plugin() {
 
                                 recordingStartPending =
                                     false
+
+                                clearVideoCaptureProof()
 
                                 Log.e(
                                     logTag,
@@ -1341,6 +1523,8 @@ class VibeCameraPlugin : Plugin() {
                             recordingStartPending =
                                 false
 
+                            clearVideoCaptureProof()
+
                             restoreCameraXPreview()
 
                             call.reject(
@@ -1351,6 +1535,8 @@ class VibeCameraPlugin : Plugin() {
                     onError = { exception ->
                         recordingStartPending =
                             false
+
+                        clearVideoCaptureProof()
 
                         restoreCameraXPreview()
 
@@ -1365,6 +1551,8 @@ class VibeCameraPlugin : Plugin() {
             ) {
                 recordingStartPending =
                     false
+
+                clearVideoCaptureProof()
 
                 Log.e(
                     logTag,
@@ -1417,6 +1605,10 @@ class VibeCameraPlugin : Plugin() {
             }
         }
     }
+
+    // -------------------------------------------------------------------------
+    // Video preview cleanup
+    // -------------------------------------------------------------------------
 
     private fun clearVideoPreview() {
         videoPreviewSurface

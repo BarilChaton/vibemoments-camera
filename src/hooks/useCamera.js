@@ -47,12 +47,12 @@ export function useCamera() {
     }
   }, [])
 
-  const capturePhoto = useCallback(async () => {
+  const capturePhoto = useCallback(async (options = {}) => {
     try {
       setIsCapturing(true)
       setError(null)
 
-      return await Camera.capturePhoto()
+      return await Camera.capturePhoto(options)
     } catch (err) {
       setError(err)
       throw err
@@ -117,7 +117,7 @@ export function useCamera() {
     }
   }, [])
 
-  const startRecording = useCallback(async () => {
+  const startRecording = useCallback(async (options = {}) => {
     try {
       setError(null)
       setIsStartingRecording(true)
@@ -125,7 +125,9 @@ export function useCamera() {
       console.log('[VibeCamera] starting video recording')
 
       const result = await Camera.startRecording({
-        withAudio: true
+        withAudio: true,
+        captureSessionId: options.captureSessionId ?? null,
+        nonce: options.nonce ?? null
       })
 
       setIsRecording(true)
