@@ -46,11 +46,15 @@ class VibeCameraPlugin : Plugin() {
          */
         private const val VIDEO_PREVIEW_WIDTH = 1280
         private const val VIDEO_PREVIEW_HEIGHT = 720
+
+        private const val CAPTURE_PROOF_VERSION = "vibemoments-capture-v1"
+        private const val CAPTURE_SIGNATURE_ALGORITHM = "ECDSA_P256_SHA256"
     }
 
     private val logTag = "VibeCamera"
 
     private lateinit var cameraManager: VibeCameraManager
+    private lateinit var captureSigner: CaptureSigner
 
     private var previewView: PreviewView? = null
     private var previewContainer: FrameLayout? = null
@@ -91,7 +95,19 @@ class VibeCameraPlugin : Plugin() {
             )
 
         videoRecorder =
-            VibeVideoRecorder(context)
+            VibeVideoRecorder(
+                context,
+            )
+
+        captureSigner =
+            CaptureSigner(
+                context,
+            )
+
+        Log.d(
+            logTag,
+            "Capture signer initialized",
+        )
     }
 
     override fun handleOnPause() {
@@ -130,6 +146,66 @@ class VibeCameraPlugin : Plugin() {
             previewView != null
         ) {
             restoreCameraXPreview()
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Capture identity
+    // -------------------------------------------------------------------------
+
+    @PluginMethod
+    fun getCaptureIdentity(call: PluginCall) {
+        try {
+            val deviceId =
+                captureSigner.getDeviceId()
+
+            val publicKey =
+                captureSigner.getPublicKeyBase64()
+
+            val result =
+                JSObject()
+
+            result.put(
+                "deviceId",
+                deviceId,
+            )
+
+            result.put(
+                "publicKey",
+                publicKey,
+            )
+
+            result.put(
+                "algorithm",
+                CAPTURE_SIGNATURE_ALGORITHM,
+            )
+
+            result.put(
+                "proofVersion",
+                CAPTURE_PROOF_VERSION,
+            )
+
+            Log.d(
+                logTag,
+                "Returning capture identity for device $deviceId",
+            )
+
+            call.resolve(
+                result,
+            )
+        } catch (
+            exception: Exception,
+        ) {
+            Log.e(
+                logTag,
+                "Unable to get capture identity",
+                exception,
+            )
+
+            call.reject(
+                "Unable to get capture identity",
+                exception,
+            )
         }
     }
 
@@ -433,6 +509,22 @@ class VibeCameraPlugin : Plugin() {
                 "nonce",
             )
 
+        if (
+            captureSessionId.isNullOrBlank() ||
+            nonce.isNullOrBlank()
+        ) {
+            Log.e(
+                logTag,
+                "Photo capture rejected because capture proof is missing",
+            )
+
+            call.reject(
+                "Missing capture session proof",
+            )
+
+            return
+        }
+
         Log.d(
             logTag,
             "Capture session ID: $captureSessionId",
@@ -454,6 +546,22 @@ class VibeCameraPlugin : Plugin() {
                     Log.d(
                         logTag,
                         "Photo SHA-256: $sha256",
+                    )
+
+                    val deviceId =
+                        captureSigner.getDeviceId()
+
+                    val captureSignature =
+                        captureSigner.signCapture(
+                            captureSessionId = captureSessionId,
+                            nonce = nonce,
+                            mediaType = "photo",
+                            sha256 = sha256,
+                        )
+
+                    Log.d(
+                        logTag,
+                        "Photo capture signature created for device $deviceId",
                     )
 
                     val result =
@@ -494,9 +602,29 @@ class VibeCameraPlugin : Plugin() {
                         nonce,
                     )
 
+                    result.put(
+                        "deviceId",
+                        deviceId,
+                    )
+
+                    result.put(
+                        "captureSignature",
+                        captureSignature,
+                    )
+
+                    result.put(
+                        "proofVersion",
+                        CAPTURE_PROOF_VERSION,
+                    )
+
+                    result.put(
+                        "signatureAlgorithm",
+                        CAPTURE_SIGNATURE_ALGORITHM,
+                    )
+
                     Log.d(
                         logTag,
-                        "Returning capture proof: session=$captureSessionId",
+                        "Returning signed photo capture proof: session=$captureSessionId",
                     )
 
                     call.resolve(
@@ -507,7 +635,7 @@ class VibeCameraPlugin : Plugin() {
                 ) {
                     Log.e(
                         logTag,
-                        "Unable to hash captured photo",
+                        "Unable to process captured photo",
                         exception,
                     )
 
@@ -1094,7 +1222,9 @@ class VibeCameraPlugin : Plugin() {
                                         )
                                     }
 
-                                    override fun onSurfaceTextureDestroyed(surfaceTexture: android.graphics.SurfaceTexture): Boolean {
+                                    override fun onSurfaceTextureDestroyed(
+                                        surfaceTexture: android.graphics.SurfaceTexture,
+                                    ): Boolean {
                                         Log.d(
                                             logTag,
                                             "Video TextureView destroyed",
@@ -1109,7 +1239,9 @@ class VibeCameraPlugin : Plugin() {
                                         return true
                                     }
 
-                                    override fun onSurfaceTextureUpdated(surfaceTexture: android.graphics.SurfaceTexture) {
+                                    override fun onSurfaceTextureUpdated(
+                                        surfaceTexture: android.graphics.SurfaceTexture,
+                                    ) {
                                     }
                                 }
                         }
@@ -1284,12 +1416,11 @@ class VibeCameraPlugin : Plugin() {
 
                 createVideoPreview(
                     onReady = { previewSurface ->
-
                         videoRecorder?.start(
                             previewSurface =
-                            previewSurface,
+                                previewSurface,
                             lens =
-                            currentLens,
+                                currentLens,
                             onStarted = {
                                 recordingStartPending =
                                     false
@@ -1322,12 +1453,9 @@ class VibeCameraPlugin : Plugin() {
 
                                 try {
                                     /*
-                                     * The MP4 is completely finalized by the
-                                     * recorder before this callback fires.
-                                     *
-                                     * Hashing here ensures the fingerprint is
-                                     * calculated from the exact bytes that will
-                                     * later be uploaded.
+                                     * The MP4 is finalized before this callback.
+                                     * Hashing here means we sign the exact file
+                                     * bytes that VibeMoments will later upload.
                                      */
                                     val sha256 =
                                         CaptureHasher.sha256(
@@ -1353,6 +1481,22 @@ class VibeCameraPlugin : Plugin() {
                                             "Video capture proof is unavailable",
                                         )
                                     }
+
+                                    val deviceId =
+                                        captureSigner.getDeviceId()
+
+                                    val captureSignature =
+                                        captureSigner.signCapture(
+                                            captureSessionId = captureSessionId,
+                                            nonce = nonce,
+                                            mediaType = "video",
+                                            sha256 = sha256,
+                                        )
+
+                                    Log.d(
+                                        logTag,
+                                        "Video capture signature created for device $deviceId",
+                                    )
 
                                     restoreCameraXPreview()
 
@@ -1409,9 +1553,29 @@ class VibeCameraPlugin : Plugin() {
                                         nonce,
                                     )
 
+                                    result.put(
+                                        "deviceId",
+                                        deviceId,
+                                    )
+
+                                    result.put(
+                                        "captureSignature",
+                                        captureSignature,
+                                    )
+
+                                    result.put(
+                                        "proofVersion",
+                                        CAPTURE_PROOF_VERSION,
+                                    )
+
+                                    result.put(
+                                        "signatureAlgorithm",
+                                        CAPTURE_SIGNATURE_ALGORITHM,
+                                    )
+
                                     Log.d(
                                         logTag,
-                                        "Returning video capture proof: session=$captureSessionId",
+                                        "Returning signed video capture proof: session=$captureSessionId",
                                     )
 
                                     clearVideoCaptureProof()

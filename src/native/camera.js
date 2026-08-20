@@ -35,6 +35,10 @@ export const Camera = {
     return VibeCameraNative.getCapabilities()
   },
 
+  getCaptureIdentity() {
+    return VibeCameraNative.getCaptureIdentity()
+  },
+
   startRecording(options = {}) {
     return VibeCameraNative.startRecording({
       withAudio: options.withAudio ?? true,
