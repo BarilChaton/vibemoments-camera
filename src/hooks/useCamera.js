@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Camera } from '../native/camera'
 
 export function useCamera() {
@@ -13,8 +13,16 @@ export function useCamera() {
   const [isStartingRecording, setIsStartingRecording] = useState(false)
   const [recordedVideo, setRecordedVideo] = useState(null)
 
+  const activeRef = useRef(false)
+  const stoppingRef = useRef(false)
+
   const start = useCallback(async () => {
     console.log('[VibeCamera] useCamera.start called')
+
+    if (activeRef.current) {
+      console.log('[VibeCamera] preview already active, ignoring start')
+      return
+    }
 
     try {
       setError(null)
@@ -27,23 +35,53 @@ export function useCamera() {
 
       const capabilities = await Camera.getCapabilities()
 
+      activeRef.current = true
+
       setHasFlash(capabilities?.hasFlash === true)
       setIsActive(true)
+
+      return result
     } catch (err) {
+      activeRef.current = false
+
       console.error('[VibeCamera] start failed:', err)
 
       setError(err)
+
       throw err
     }
   }, [lens])
 
   const stop = useCallback(async () => {
+    if (!activeRef.current || stoppingRef.current) {
+      return
+    }
+
+    stoppingRef.current = true
+
+    /*
+     * Mark the preview inactive before awaiting native cleanup.
+     *
+     * This makes stop() idempotent. If another cleanup path runs while
+     * stopPreview() is in progress, it will see activeRef=false and return
+     * without issuing another native stopPreview call.
+     */
+    activeRef.current = false
+
     try {
+      console.log('[VibeCamera] stopping native preview')
+
       await Camera.stopPreview()
+
       setIsActive(false)
+      setTorchEnabled(false)
+      setFlashModeState('off')
     } catch (err) {
       setError(err)
+
       throw err
+    } finally {
+      stoppingRef.current = false
     }
   }, [])
 
@@ -55,6 +93,7 @@ export function useCamera() {
       return await Camera.capturePhoto(options)
     } catch (err) {
       setError(err)
+
       throw err
     } finally {
       setIsCapturing(false)
@@ -83,6 +122,7 @@ export function useCamera() {
       return result
     } catch (err) {
       setError(err)
+
       throw err
     }
   }, [])
@@ -98,6 +138,7 @@ export function useCamera() {
       return result
     } catch (err) {
       setError(err)
+
       throw err
     }
   }, [])
@@ -113,6 +154,7 @@ export function useCamera() {
       return result
     } catch (err) {
       setError(err)
+
       throw err
     }
   }, [])
@@ -136,6 +178,7 @@ export function useCamera() {
     } catch (err) {
       setError(err)
       setIsRecording(false)
+
       throw err
     } finally {
       setIsStartingRecording(false)
@@ -152,15 +195,34 @@ export function useCamera() {
     } catch (err) {
       setError(err)
       setIsRecording(false)
+
       throw err
     }
   }, [])
 
+  // ---------------------------------------------------------------------------
+  // Native preview cleanup
+  // ---------------------------------------------------------------------------
+
   useEffect(() => {
     return () => {
-      if (isActive) Camera.stopPreview()
+      if (!activeRef.current || stoppingRef.current) {
+        return
+      }
+
+      activeRef.current = false
+
+      console.log('[VibeCamera] cleaning up native preview on unmount')
+
+      Camera.stopPreview().catch((err) => {
+        console.error('[VibeCamera] failed to clean up preview on unmount:', err)
+      })
     }
-  }, [isActive])
+  }, [])
+
+  // ---------------------------------------------------------------------------
+  // Video recording events
+  // ---------------------------------------------------------------------------
 
   useEffect(() => {
     let finishedListener

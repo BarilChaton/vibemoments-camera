@@ -2,6 +2,7 @@ package com.vibemoments.camera
 
 import android.annotation.SuppressLint
 import android.content.Context
+import android.graphics.Rect
 import android.hardware.camera2.CameraCaptureSession
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraDevice
@@ -106,6 +107,31 @@ class VibeVideoRecorder(
 
     private var captureSession:
         CameraCaptureSession? = null
+
+    /*
+     * The repeating Camera2 request used while recording.
+     *
+     * We retain this builder so zoom can update SCALER_CROP_REGION
+     * without restarting the camera session or encoder.
+     */
+    private var recordingRequestBuilder:
+        CaptureRequest.Builder? = null
+
+    /*
+     * Physical active sensor area used to calculate Camera2 crop regions.
+     */
+    private var sensorActiveArray:
+        Rect? = null
+
+    /*
+     * Maximum digital zoom reported by the current Camera2 device.
+     */
+    private var maxDigitalZoom =
+        1.0f
+
+    @Volatile
+    private var currentZoomRatio =
+        1.0f
 
     private var videoEncoder:
         MediaCodec? = null
@@ -238,6 +264,33 @@ class VibeVideoRecorder(
                 findCameraId(
                     lens,
                 )
+
+            /*
+             * Read Camera2 zoom capabilities before opening the device.
+             */
+            val characteristics =
+                cameraManager
+                    .getCameraCharacteristics(
+                        cameraId,
+                    )
+
+            sensorActiveArray =
+                characteristics.get(
+                    CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE,
+                )
+
+            maxDigitalZoom =
+                characteristics.get(
+                    CameraCharacteristics.SCALER_AVAILABLE_MAX_DIGITAL_ZOOM,
+                ) ?: 1.0f
+
+            currentZoomRatio =
+                1.0f
+
+            Log.d(
+                TAG,
+                "Video zoom range: 1.0x - ${maxDigitalZoom}x",
+            )
 
             val videoSize =
                 chooseVideoSize(
@@ -423,7 +476,8 @@ class VibeVideoRecorder(
         stop()
     }
 
-    fun isRecording(): Boolean = recording
+    fun isRecording(): Boolean =
+        recording
 
     fun isBusy(): Boolean =
         (
@@ -431,6 +485,157 @@ class VibeVideoRecorder(
                 recording ||
                 stopping
         )
+
+    // -------------------------------------------------------------------------
+    // Video zoom
+    // -------------------------------------------------------------------------
+
+    fun setZoomRatio(ratio: Float): Float {
+        if (
+            !recording ||
+            stopping
+        ) {
+            throw IllegalStateException(
+                "Video recording is not active",
+            )
+        }
+
+        val clampedRatio =
+            ratio.coerceIn(
+                1.0f,
+                maxDigitalZoom,
+            )
+
+        currentZoomRatio =
+            clampedRatio
+
+        /*
+         * CameraCaptureSession and its request are owned by the camera thread.
+         * Post the update there rather than changing them from Capacitor's
+         * plugin thread.
+         */
+        cameraHandler.post {
+            try {
+                val session =
+                    captureSession
+                        ?: return@post
+
+                val builder =
+                    recordingRequestBuilder
+                        ?: return@post
+
+                applyZoomToRequest(
+                    builder,
+                    clampedRatio,
+                )
+
+                session.setRepeatingRequest(
+                    builder.build(),
+                    null,
+                    cameraHandler,
+                )
+
+                Log.d(
+                    TAG,
+                    "Video zoom ratio set to: ${"%.2f".format(clampedRatio)}x",
+                )
+            } catch (
+                exception: Exception,
+            ) {
+                /*
+                 * A failed zoom operation should not destroy an otherwise
+                 * valid recording.
+                 */
+                Log.e(
+                    TAG,
+                    "Unable to change video zoom",
+                    exception,
+                )
+            }
+        }
+
+        return clampedRatio
+    }
+
+    fun getZoomRatio(): Float =
+        currentZoomRatio
+
+    fun getMinZoomRatio(): Float =
+        1.0f
+
+    fun getMaxZoomRatio(): Float =
+        maxDigitalZoom
+
+    private fun applyZoomToRequest(
+        builder: CaptureRequest.Builder,
+        requestedRatio: Float,
+    ) {
+        val sensorRect =
+            sensorActiveArray
+                ?: return
+
+        val ratio =
+            requestedRatio.coerceIn(
+                1.0f,
+                maxDigitalZoom,
+            )
+
+        if (
+            ratio <=
+            1.0f
+        ) {
+            /*
+             * Explicitly restore the full active sensor region at 1x.
+             */
+            builder.set(
+                CaptureRequest.SCALER_CROP_REGION,
+                sensorRect,
+            )
+
+            return
+        }
+
+        val cropWidth =
+            (
+                sensorRect.width()
+                    .toFloat() /
+                    ratio
+            ).toInt()
+
+        val cropHeight =
+            (
+                sensorRect.height()
+                    .toFloat() /
+                    ratio
+            ).toInt()
+
+        val left =
+            sensorRect.left +
+                (
+                    sensorRect.width() -
+                        cropWidth
+                ) / 2
+
+        val top =
+            sensorRect.top +
+                (
+                    sensorRect.height() -
+                        cropHeight
+                ) / 2
+
+        val cropRegion =
+            Rect(
+                left,
+                top,
+                left + cropWidth,
+                top + cropHeight,
+            )
+
+        builder.set(
+            CaptureRequest.SCALER_CROP_REGION,
+            cropRegion,
+        )
+    }
 
     private fun resetRecordingState() {
         recording =
@@ -471,6 +676,18 @@ class VibeVideoRecorder(
 
         recordingStartNs =
             0L
+
+        recordingRequestBuilder =
+            null
+
+        sensorActiveArray =
+            null
+
+        maxDigitalZoom =
+            1.0f
+
+        currentZoomRatio =
+            1.0f
 
         synchronized(
             muxerLock,
@@ -919,6 +1136,14 @@ class VibeVideoRecorder(
                                     )
                                 }
 
+                        recordingRequestBuilder =
+                            request
+
+                        applyZoomToRequest(
+                            request,
+                            currentZoomRatio,
+                        )
+
                         session.setRepeatingRequest(
                             request.build(),
                             null,
@@ -1294,11 +1519,11 @@ class VibeVideoRecorder(
                                 track =
                                     "video",
                                 buffer =
-                                outputBuffer,
+                                    outputBuffer,
                                 info =
-                                bufferInfo,
+                                    bufferInfo,
                                 presentationTimeUs =
-                                normalizedPts,
+                                    normalizedPts,
                             )
                         }
                     }
@@ -1434,11 +1659,11 @@ class VibeVideoRecorder(
                             track =
                                 "audio",
                             buffer =
-                            outputBuffer,
+                                outputBuffer,
                             info =
-                            bufferInfo,
+                                bufferInfo,
                             presentationTimeUs =
-                            normalizedPts,
+                                normalizedPts,
                         )
                     }
 
@@ -1502,11 +1727,11 @@ class VibeVideoRecorder(
                 pendingSamples.add(
                     PendingSample(
                         track =
-                        track,
+                            track,
                         data =
-                        bytes,
+                            bytes,
                         presentationTimeUs =
-                        presentationTimeUs,
+                            presentationTimeUs,
                         flags =
                             info.flags,
                     ),
@@ -1764,6 +1989,9 @@ class VibeVideoRecorder(
         captureSession =
             null
 
+        recordingRequestBuilder =
+            null
+
         try {
             cameraDevice
                 ?.close()
@@ -1892,7 +2120,7 @@ class VibeVideoRecorder(
 
         releaseRecordingResources(
             stopMuxer =
-            true,
+                true,
         )
 
         val file =
@@ -2088,7 +2316,7 @@ class VibeVideoRecorder(
 
         releaseRecordingResources(
             stopMuxer =
-            true,
+                true,
         )
 
         synchronized(

@@ -23,6 +23,14 @@ export const Camera = {
     return VibeCameraNative.getCameraState()
   },
 
+  setZoomRatio(ratio) {
+    return VibeCameraNative.setZoomRatio({ ratio })
+  },
+
+  getZoomState() {
+    return VibeCameraNative.getZoomState()
+  },
+
   setTorch(enabled) {
     return VibeCameraNative.setTorch({ enabled })
   },

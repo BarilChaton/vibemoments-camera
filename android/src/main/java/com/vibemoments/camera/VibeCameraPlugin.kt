@@ -671,6 +671,16 @@ class VibeCameraPlugin : Plugin() {
             "switchCamera called",
         )
 
+        if (
+            videoRecorder?.isRecording() == true
+        ) {
+            call.reject(
+                "Cannot switch camera while recording",
+            )
+
+            return
+        }
+
         activity.runOnUiThread {
             try {
                 val lens =
@@ -687,6 +697,21 @@ class VibeCameraPlugin : Plugin() {
                 result.put(
                     "lens",
                     lens,
+                )
+
+                result.put(
+                    "zoomRatio",
+                    cameraManager.currentZoomRatio(),
+                )
+
+                result.put(
+                    "minZoomRatio",
+                    cameraManager.minZoomRatio(),
+                )
+
+                result.put(
+                    "maxZoomRatio",
+                    cameraManager.maxZoomRatio(),
                 )
 
                 call.resolve(
@@ -711,6 +736,12 @@ class VibeCameraPlugin : Plugin() {
 
     @PluginMethod
     fun getCameraState(call: PluginCall) {
+        val recorder =
+            videoRecorder
+
+        val recording =
+            recorder?.isRecording() == true
+
         val result =
             JSObject()
 
@@ -724,9 +755,215 @@ class VibeCameraPlugin : Plugin() {
             cameraManager.currentLens(),
         )
 
+        result.put(
+            "recording",
+            recording,
+        )
+
+        result.put(
+            "zoomRatio",
+            if (
+                recording
+            ) {
+                recorder!!.getZoomRatio()
+            } else {
+                cameraManager.currentZoomRatio()
+            },
+        )
+
         call.resolve(
             result,
         )
+    }
+
+    // -------------------------------------------------------------------------
+    // Zoom
+    // -------------------------------------------------------------------------
+
+    @PluginMethod
+    fun setZoomRatio(call: PluginCall) {
+        val ratio =
+            call.getDouble(
+                "ratio",
+            )
+
+        if (
+            ratio == null ||
+            ratio <= 0.0
+        ) {
+            call.reject(
+                "Invalid zoom ratio",
+            )
+
+            return
+        }
+
+        Log.d(
+            logTag,
+            "setZoomRatio called: $ratio",
+        )
+
+        activity.runOnUiThread {
+            try {
+                val recorder =
+                    videoRecorder
+
+                val recording =
+                    recorder?.isRecording() == true
+
+                val appliedRatio =
+                    if (
+                        recording
+                    ) {
+                        Log.d(
+                            logTag,
+                            "Routing zoom to Camera2 video recorder",
+                        )
+
+                        recorder!!.setZoomRatio(
+                            ratio.toFloat(),
+                        )
+                    } else {
+                        Log.d(
+                            logTag,
+                            "Routing zoom to CameraX preview",
+                        )
+
+                        cameraManager.setZoomRatio(
+                            ratio.toFloat(),
+                        )
+                    }
+
+                val result =
+                    JSObject()
+
+                result.put(
+                    "ratio",
+                    appliedRatio,
+                )
+
+                result.put(
+                    "minRatio",
+                    if (
+                        recording
+                    ) {
+                        recorder!!.getMinZoomRatio()
+                    } else {
+                        cameraManager.minZoomRatio()
+                    },
+                )
+
+                result.put(
+                    "maxRatio",
+                    if (
+                        recording
+                    ) {
+                        recorder!!.getMaxZoomRatio()
+                    } else {
+                        cameraManager.maxZoomRatio()
+                    },
+                )
+
+                result.put(
+                    "recording",
+                    recording,
+                )
+
+                call.resolve(
+                    result,
+                )
+            } catch (
+                exception: Exception,
+            ) {
+                Log.e(
+                    logTag,
+                    "Unable to set zoom ratio",
+                    exception,
+                )
+
+                call.reject(
+                    "Unable to set zoom ratio",
+                    exception,
+                )
+            }
+        }
+    }
+
+    @PluginMethod
+    fun getZoomState(call: PluginCall) {
+        Log.d(
+            logTag,
+            "getZoomState called",
+        )
+
+        activity.runOnUiThread {
+            try {
+                val recorder =
+                    videoRecorder
+
+                val recording =
+                    recorder?.isRecording() == true
+
+                val result =
+                    JSObject()
+
+                if (
+                    recording
+                ) {
+                    result.put(
+                        "ratio",
+                        recorder!!.getZoomRatio(),
+                    )
+
+                    result.put(
+                        "minRatio",
+                        recorder.getMinZoomRatio(),
+                    )
+
+                    result.put(
+                        "maxRatio",
+                        recorder.getMaxZoomRatio(),
+                    )
+                } else {
+                    result.put(
+                        "ratio",
+                        cameraManager.currentZoomRatio(),
+                    )
+
+                    result.put(
+                        "minRatio",
+                        cameraManager.minZoomRatio(),
+                    )
+
+                    result.put(
+                        "maxRatio",
+                        cameraManager.maxZoomRatio(),
+                    )
+                }
+
+                result.put(
+                    "recording",
+                    recording,
+                )
+
+                call.resolve(
+                    result,
+                )
+            } catch (
+                exception: Exception,
+            ) {
+                Log.e(
+                    logTag,
+                    "Unable to get zoom state",
+                    exception,
+                )
+
+                call.reject(
+                    "Unable to get zoom state",
+                    exception,
+                )
+            }
+        }
     }
 
     @PluginMethod
@@ -824,6 +1061,12 @@ class VibeCameraPlugin : Plugin() {
 
     @PluginMethod
     fun getCapabilities(call: PluginCall) {
+        val recorder =
+            videoRecorder
+
+        val recording =
+            recorder?.isRecording() == true
+
         val result =
             JSObject()
 
@@ -835,6 +1078,44 @@ class VibeCameraPlugin : Plugin() {
         result.put(
             "lens",
             cameraManager.currentLens(),
+        )
+
+        result.put(
+            "recording",
+            recording,
+        )
+
+        result.put(
+            "zoomRatio",
+            if (
+                recording
+            ) {
+                recorder!!.getZoomRatio()
+            } else {
+                cameraManager.currentZoomRatio()
+            },
+        )
+
+        result.put(
+            "minZoomRatio",
+            if (
+                recording
+            ) {
+                recorder!!.getMinZoomRatio()
+            } else {
+                cameraManager.minZoomRatio()
+            },
+        )
+
+        result.put(
+            "maxZoomRatio",
+            if (
+                recording
+            ) {
+                recorder!!.getMaxZoomRatio()
+            } else {
+                cameraManager.maxZoomRatio()
+            },
         )
 
         call.resolve(
@@ -1068,7 +1349,9 @@ class VibeCameraPlugin : Plugin() {
     // Video preview
     // -------------------------------------------------------------------------
 
-    private fun configureVideoPreviewTransform(textureView: android.view.TextureView) {
+    private fun configureVideoPreviewTransform(
+        textureView: android.view.TextureView,
+    ) {
         textureView.post {
             val viewWidth =
                 textureView.width.toFloat()
@@ -1436,6 +1719,24 @@ class VibeCameraPlugin : Plugin() {
                                 result.put(
                                     "recording",
                                     true,
+                                )
+
+                                result.put(
+                                    "zoomRatio",
+                                    videoRecorder?.getZoomRatio()
+                                        ?: 1.0f,
+                                )
+
+                                result.put(
+                                    "minZoomRatio",
+                                    videoRecorder?.getMinZoomRatio()
+                                        ?: 1.0f,
+                                )
+
+                                result.put(
+                                    "maxZoomRatio",
+                                    videoRecorder?.getMaxZoomRatio()
+                                        ?: 1.0f,
                                 )
 
                                 call.resolve(

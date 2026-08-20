@@ -2,7 +2,16 @@ import { useEffect, useRef, useState } from 'react'
 import { FiCamera, FiRefreshCw, FiZap, FiX } from 'react-icons/fi'
 import { useCamera } from '../hooks/useCamera'
 
-export function VibeCamera({ autoStart = true, captureSession = null, initialMode = 'photo', onCapture, onError, onClose }) {
+export function VibeCamera({
+  autoStart = true,
+  captureSession = null,
+  sessionUpdating = false,
+  initialMode = 'photo',
+  onCapture,
+  onModeChange,
+  onError,
+  onClose
+}) {
   const {
     isActive,
     isCapturing,
@@ -66,6 +75,13 @@ export function VibeCamera({ autoStart = true, captureSession = null, initialMod
     onCapture?.(recordedVideo)
   }, [recordedVideo])
 
+  const handleModeChange = (nextMode) => {
+    if (nextMode === mode) return
+
+    setMode(nextMode)
+    onModeChange?.(nextMode)
+  }
+
   const cycleFlashMode = async () => {
     try {
       const next = flashMode === 'off' ? 'auto' : flashMode === 'auto' ? 'on' : 'off'
@@ -120,7 +136,7 @@ export function VibeCamera({ autoStart = true, captureSession = null, initialMod
     onClose?.()
   }
 
-  const captureDisabled = !isActive || isCapturing || isStartingRecording
+  const captureDisabled = !isActive || isCapturing || isStartingRecording || sessionUpdating
 
   const flipDisabled = !isActive || isCapturing || isRecording || isStartingRecording
 
@@ -182,14 +198,16 @@ export function VibeCamera({ autoStart = true, captureSession = null, initialMod
               <button
                 className={`rounded-full px-5 py-2 text-sm font-bold transition ${mode === 'photo' ? 'bg-white text-black' : 'text-white'}`}
                 type="button"
-                onClick={() => setMode('photo')}>
+                disabled={sessionUpdating}
+                onClick={() => handleModeChange('photo')}>
                 Photo
               </button>
 
               <button
                 className={`rounded-full px-5 py-2 text-sm font-bold transition ${mode === 'video' ? 'bg-white text-black' : 'text-white'}`}
                 type="button"
-                onClick={() => setMode('video')}>
+                disabled={sessionUpdating}
+                onClick={() => handleModeChange('video')}>
                 Video
               </button>
             </div>
