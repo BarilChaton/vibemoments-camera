@@ -136,7 +136,7 @@ export function VibeCamera({
     onClose?.()
   }
 
-  const captureDisabled = !isActive || isCapturing || isStartingRecording || sessionUpdating
+  const captureDisabled = !isActive || !captureSession || isCapturing || isStartingRecording || sessionUpdating
 
   const flipDisabled = !isActive || isCapturing || isRecording || isStartingRecording
 

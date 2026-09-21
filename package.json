@@ -1,6 +1,6 @@
 {
   "name": "@barilchaton/vibemoments-camera",
-  "version": "0.1.20",
+  "version": "0.1.21",
   "description": "Native camera engine and React components for VibeMoments",
   "type": "module",
   "main": "./dist/vibemoments-camera.js",
