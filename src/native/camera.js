@@ -3,75 +3,133 @@ import { registerPlugin } from '@capacitor/core'
 export const VibeCameraNative = registerPlugin('VibeCamera')
 
 export const Camera = {
-  startPreview(options = {}) {
-    return VibeCameraNative.startPreview(options)
+  // ---------------------------------------------------------------------------
+  // Permissions
+  // ---------------------------------------------------------------------------
+
+  async checkPermissions() {
+    return VibeCameraNative.checkPermissions()
   },
 
-  stopPreview() {
-    return VibeCameraNative.stopPreview()
+  async requestPermissions() {
+    return VibeCameraNative.requestPermissions()
   },
 
-  capturePhoto(options = {}) {
-    return VibeCameraNative.capturePhoto(options)
-  },
+  // ---------------------------------------------------------------------------
+  // Capture identity
+  // ---------------------------------------------------------------------------
 
-  switchCamera() {
-    return VibeCameraNative.switchCamera()
-  },
-
-  getCameraState() {
-    return VibeCameraNative.getCameraState()
-  },
-
-  setZoomRatio(ratio) {
-    return VibeCameraNative.setZoomRatio({ ratio })
-  },
-
-  getZoomState() {
-    return VibeCameraNative.getZoomState()
-  },
-
-  setTorch(enabled) {
-    return VibeCameraNative.setTorch({ enabled })
-  },
-
-  setFlashMode(mode) {
-    return VibeCameraNative.setFlashMode({ mode })
-  },
-
-  getCapabilities() {
-    return VibeCameraNative.getCapabilities()
-  },
-
-  getCaptureIdentity() {
+  async getCaptureIdentity() {
     return VibeCameraNative.getCaptureIdentity()
   },
 
-  startRecording(options = {}) {
-    return VibeCameraNative.startRecording({
-      withAudio: options.withAudio ?? true,
-      captureSessionId: options.captureSessionId ?? null,
-      nonce: options.nonce ?? null
-    })
+  // ---------------------------------------------------------------------------
+  // Preview
+  // ---------------------------------------------------------------------------
+
+  async startPreview(options = {}) {
+    return VibeCameraNative.startPreview(options)
   },
 
-  stopRecording() {
+  async stopPreview() {
+    return VibeCameraNative.stopPreview()
+  },
+
+  async switchCamera() {
+    return VibeCameraNative.switchCamera()
+  },
+
+  // ---------------------------------------------------------------------------
+  // Photo capture
+  // ---------------------------------------------------------------------------
+
+  async capturePhoto(options = {}) {
+    return VibeCameraNative.capturePhoto(options)
+  },
+
+  // ---------------------------------------------------------------------------
+  // Video recording
+  // ---------------------------------------------------------------------------
+
+  async startRecording(options = {}) {
+    return VibeCameraNative.startRecording(options)
+  },
+
+  async stopRecording() {
     return VibeCameraNative.stopRecording()
   },
 
-  deleteCapture(path) {
-    return VibeCameraNative.deleteCapture({ path })
+  async getRecordingState() {
+    return VibeCameraNative.getRecordingState()
   },
 
-  clearCache() {
-    return VibeCameraNative.clearCache()
+  // ---------------------------------------------------------------------------
+  // Camera capabilities
+  // ---------------------------------------------------------------------------
+
+  async getCapabilities() {
+    return VibeCameraNative.getCapabilities()
   },
 
-  addVideoRecordingFinishedListener(callback) {
+  // ---------------------------------------------------------------------------
+  // Torch / flash
+  // ---------------------------------------------------------------------------
+
+  async setTorch(enabled) {
+    return VibeCameraNative.setTorch({
+      enabled
+    })
+  },
+
+  async setFlashMode(mode) {
+    return VibeCameraNative.setFlashMode({
+      mode
+    })
+  },
+
+  // ---------------------------------------------------------------------------
+  // Zoom
+  // ---------------------------------------------------------------------------
+
+  async getZoomState() {
+    return VibeCameraNative.getZoomState()
+  },
+
+  async setZoomRatio(ratio) {
+    return VibeCameraNative.setZoomRatio({
+      ratio
+    })
+  },
+
+  // ---------------------------------------------------------------------------
+  // Temporary capture cleanup
+  // ---------------------------------------------------------------------------
+
+  async deleteTemporaryCapture(path) {
+    return VibeCameraNative.deleteTemporaryCapture({
+      path
+    })
+  },
+
+  // ---------------------------------------------------------------------------
+  // Video recording events
+  // ---------------------------------------------------------------------------
+
+  async addVideoRecordingFinishedListener(callback) {
     return VibeCameraNative.addListener('videoRecordingFinished', callback)
   },
 
-  addVideoRecordingErrorListener(callback) {
+  async addVideoRecordingErrorListener(callback) {
     return VibeCameraNative.addListener('videoRecordingError', callback)
+  },
+
+  // ---------------------------------------------------------------------------
+  // Permission events
+  // ---------------------------------------------------------------------------
+
+  async addCameraPermissionChangedListener(callback) {
+    return VibeCameraNative.addListener('cameraPermissionChanged', callback)
   }
 }
+
+export default Camera

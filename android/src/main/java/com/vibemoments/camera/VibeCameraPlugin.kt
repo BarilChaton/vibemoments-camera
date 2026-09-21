@@ -1,6 +1,7 @@
 package com.vibemoments.camera
 
 import android.Manifest
+import android.content.Context
 import android.content.pm.PackageManager
 import android.graphics.Color
 import android.graphics.Matrix
@@ -79,6 +80,13 @@ class VibeCameraPlugin : Plugin() {
     private var appPaused = false
     private var cameraXNeedsRestore = false
 
+    private val permissionPrefs by lazy {
+        context.getSharedPreferences(
+            "vibecamera_permissions",
+            Context.MODE_PRIVATE,
+        )
+    }
+
     override fun load() {
         super.load()
 
@@ -108,6 +116,90 @@ class VibeCameraPlugin : Plugin() {
             logTag,
             "Capture signer initialized",
         )
+    }
+
+    private fun hasCameraPermission(): Boolean {
+        return ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.CAMERA,
+        ) == PackageManager.PERMISSION_GRANTED
+    }
+
+    private fun hasMicrophonePermission(): Boolean {
+        return ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.RECORD_AUDIO,
+        ) == PackageManager.PERMISSION_GRANTED
+    }
+
+    private fun hasRequestedPermission(alias: String): Boolean {
+        return permissionPrefs.getBoolean(
+            "requested_$alias",
+            false,
+        )
+    }
+
+    private fun markPermissionRequested(alias: String) {
+        permissionPrefs
+            .edit()
+            .putBoolean(
+                "requested_$alias",
+                true,
+            )
+            .apply()
+    }
+
+    private fun getPermissionStatus(
+        alias: String,
+        permission: String,
+        granted: Boolean,
+    ): String {
+        if (granted) {
+            // If we can observe a grant, this permission has been decided at
+            // least once. Remember that so a later one-time revocation is not
+            // mistaken for a never-requested permission.
+            markPermissionRequested(alias)
+            return "granted"
+        }
+
+        if (!hasRequestedPermission(alias)) {
+            return "prompt"
+        }
+
+        return if (activity.shouldShowRequestPermissionRationale(permission)) {
+            "denied"
+        } else {
+            "blocked"
+        }
+    }
+
+    private fun getCameraPermissionStatus(): String {
+        return getPermissionStatus(
+            alias = "camera",
+            permission = Manifest.permission.CAMERA,
+            granted = hasCameraPermission(),
+        )
+    }
+
+    private fun getMicrophonePermissionStatus(): String {
+        return getPermissionStatus(
+            alias = "microphone",
+            permission = Manifest.permission.RECORD_AUDIO,
+            granted = hasMicrophonePermission(),
+        )
+    }
+
+    private fun createPermissionResult(): JSObject {
+        return JSObject().apply {
+            put(
+                "camera",
+                getCameraPermissionStatus(),
+            )
+            put(
+                "microphone",
+                getMicrophonePermissionStatus(),
+            )
+        }
     }
 
     override fun handleOnPause() {
@@ -141,12 +233,127 @@ class VibeCameraPlugin : Plugin() {
             "App resumed",
         )
 
+        if (!hasCameraPermission()) {
+            handleCameraPermissionLost()
+            return
+        }
+
         if (
             cameraXNeedsRestore &&
             previewView != null
         ) {
             restoreCameraXPreview()
         }
+    }
+
+    private fun handleCameraPermissionLost() {
+        val hadCameraState =
+            previewView != null ||
+                previewContainer != null ||
+                cameraXNeedsRestore ||
+                recordingStartPending ||
+                videoRecorder?.isRecording() == true
+
+        if (!hadCameraState) {
+            return
+        }
+
+        Log.w(
+            logTag,
+            "Camera permission is no longer available; clearing camera state",
+        )
+
+        activity.runOnUiThread {
+            try {
+                videoRecorder?.stopIfRecording()
+            } catch (exception: Exception) {
+                Log.e(
+                    logTag,
+                    "Unable to stop recording after camera permission loss",
+                    exception,
+                )
+            }
+
+            recordingStartPending = false
+            pendingVideoCall = null
+            clearVideoCaptureProof()
+            cameraXNeedsRestore = false
+
+            try {
+                cameraManager.stopPreview()
+            } catch (exception: Exception) {
+                Log.e(
+                    logTag,
+                    "Unable to stop CameraX after camera permission loss",
+                    exception,
+                )
+            }
+
+            clearVideoPreview()
+
+            previewContainer?.let { container ->
+                (container.parent as? ViewGroup)
+                    ?.removeView(container)
+            }
+
+            previewView = null
+            previewContainer = null
+
+            bridge.webView.setBackgroundColor(
+                Color.WHITE,
+            )
+
+            val result = createPermissionResult()
+            notifyListeners(
+                "cameraPermissionChanged",
+                result,
+            )
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Permissions
+    // -------------------------------------------------------------------------
+
+    @PluginMethod
+    fun checkPermissions(call: PluginCall) {
+        call.resolve(
+            createPermissionResult(),
+        )
+    }
+
+    @PluginMethod
+    fun requestPermissions(call: PluginCall) {
+        if (hasCameraPermission()) {
+            call.resolve(
+                createPermissionResult(),
+            )
+            return
+        }
+
+        markPermissionRequested(
+            "camera",
+        )
+
+        requestPermissionForAlias(
+            "camera",
+            call,
+            "cameraPermissionRequestCallback",
+        )
+    }
+
+    @PermissionCallback
+    private fun cameraPermissionRequestCallback(call: PluginCall) {
+        val result = createPermissionResult()
+
+        notifyListeners(
+            "cameraPermissionChanged",
+            result,
+        )
+
+        call.resolve(
+            result,
+        )
     }
 
     // -------------------------------------------------------------------------
@@ -220,6 +427,20 @@ class VibeCameraPlugin : Plugin() {
             "startPreview called",
         )
 
+        if (!hasCameraPermission()) {
+            Log.w(
+                logTag,
+                "startPreview rejected because camera permission is missing",
+            )
+
+            call.reject(
+                "Camera permission is required",
+                "CAMERA_PERMISSION_REQUIRED",
+            )
+
+            return
+        }
+
         if (previewView != null) {
             Log.d(
                 logTag,
@@ -245,56 +466,6 @@ class VibeCameraPlugin : Plugin() {
 
             return
         }
-
-        if (
-            ContextCompat.checkSelfPermission(
-                context,
-                Manifest.permission.CAMERA,
-            ) != PackageManager.PERMISSION_GRANTED
-        ) {
-            Log.d(
-                logTag,
-                "Camera permission missing, requesting",
-            )
-
-            requestPermissionForAlias(
-                "camera",
-                call,
-                "cameraPermissionCallback",
-            )
-
-            return
-        }
-
-        openPreview(
-            call,
-        )
-    }
-
-    @PermissionCallback
-    private fun cameraPermissionCallback(call: PluginCall) {
-        if (
-            ContextCompat.checkSelfPermission(
-                context,
-                Manifest.permission.CAMERA,
-            ) != PackageManager.PERMISSION_GRANTED
-        ) {
-            Log.e(
-                logTag,
-                "Camera permission denied",
-            )
-
-            call.reject(
-                "Camera permission denied",
-            )
-
-            return
-        }
-
-        Log.d(
-            logTag,
-            "Camera permission granted",
-        )
 
         openPreview(
             call,
@@ -498,6 +669,20 @@ class VibeCameraPlugin : Plugin() {
             logTag,
             "capturePhoto called",
         )
+
+        if (!hasCameraPermission()) {
+            Log.w(
+                logTag,
+                "Photo capture rejected because camera permission is missing",
+            )
+
+            call.reject(
+                "Camera permission is required",
+                "CAMERA_PERMISSION_REQUIRED",
+            )
+
+            return
+        }
 
         val captureSessionId =
             call.getString(
@@ -1566,6 +1751,20 @@ class VibeCameraPlugin : Plugin() {
             "startRecording called",
         )
 
+        if (!hasCameraPermission()) {
+            Log.w(
+                logTag,
+                "Video recording rejected because camera permission is missing",
+            )
+
+            call.reject(
+                "Camera permission is required",
+                "CAMERA_PERMISSION_REQUIRED",
+            )
+
+            return
+        }
+
         if (
             recordingStartPending
         ) {
@@ -1621,15 +1820,14 @@ class VibeCameraPlugin : Plugin() {
         recordingStartPending =
             true
 
-        if (
-            ContextCompat.checkSelfPermission(
-                context,
-                Manifest.permission.RECORD_AUDIO,
-            ) != PackageManager.PERMISSION_GRANTED
-        ) {
+        if (!hasMicrophonePermission()) {
             Log.d(
                 logTag,
                 "Microphone permission missing, requesting",
+            )
+
+            markPermissionRequested(
+                "microphone",
             )
 
             requestPermissionForAlias(
@@ -1648,12 +1846,7 @@ class VibeCameraPlugin : Plugin() {
 
     @PermissionCallback
     private fun microphonePermissionCallback(call: PluginCall) {
-        if (
-            ContextCompat.checkSelfPermission(
-                context,
-                Manifest.permission.RECORD_AUDIO,
-            ) != PackageManager.PERMISSION_GRANTED
-        ) {
+        if (!hasMicrophonePermission()) {
             recordingStartPending =
                 false
 
@@ -2095,6 +2288,16 @@ class VibeCameraPlugin : Plugin() {
     }
 
     private fun restoreCameraXPreview() {
+        if (!hasCameraPermission()) {
+            Log.w(
+                logTag,
+                "CameraX restore skipped because camera permission is missing",
+            )
+
+            handleCameraPermissionLost()
+            return
+        }
+
         activity.runOnUiThread {
             clearVideoPreview()
 

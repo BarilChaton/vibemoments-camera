@@ -27,6 +27,15 @@ export function useCamera() {
     try {
       setError(null)
 
+      const permissions = await Camera.checkPermissions()
+
+      if (permissions.camera !== 'granted') {
+        const permissionError = new Error('Camera permission is required')
+        permissionError.code = 'CAMERA_PERMISSION_REQUIRED'
+
+        throw permissionError
+      }
+
       console.log('[VibeCamera] calling native startPreview')
 
       const result = await Camera.startPreview({
