@@ -316,23 +316,24 @@ class VibeCameraPlugin : Plugin() {
     // -------------------------------------------------------------------------
 
     @PluginMethod
-    fun checkPermissions(call: PluginCall) {
+    override fun checkPermissions(call: PluginCall) {
         call.resolve(
             createPermissionResult(),
         )
     }
 
     @PluginMethod
-    fun requestPermissions(call: PluginCall) {
+    override fun requestPermissions(call: PluginCall) {
         if (hasCameraPermission()) {
             call.resolve(
                 createPermissionResult(),
             )
+
             return
         }
 
         markPermissionRequested(
-            "camera",
+            alias = "camera",
         )
 
         requestPermissionForAlias(
