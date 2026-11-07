@@ -1,6 +1,6 @@
-# VibeMoments Camera
+# VibeCamera
 
-A native Android camera engine and React camera interface built for **VibeMoments**.
+A native Android camera engine and React camera interface.
 
 `@barilchaton/vibemoments-camera` combines CameraX photo capture and preview with a Camera2 + MediaCodec video recorder, exposed through Capacitor. Use the low-level `Camera` API, the `useCamera` hook, or the `VibeCamera` component.
 
